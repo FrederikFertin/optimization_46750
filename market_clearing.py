@@ -10,7 +10,7 @@ class expando(object):
 
 class EconomicDispatch(Network, CommonMethods):
     
-    def __init__(self, n_hours: int, ramping: bool, battery: bool, hydrogen: bool): # initialize class
+    def __init__(self, n_hours: int): # initialize class
         super().__init__()
         
         self.data = expando() # build data attributes
@@ -18,11 +18,6 @@ class EconomicDispatch(Network, CommonMethods):
         self.constraints = expando() # build constraint attributes
         self.results = expando() # build results attributes
         self.TIMES = self.TIMES[:n_hours] # set number of hours to run the model
-        self.ramping = ramping # Is ramping constraints enforced?
-        self.battery = battery # Is battery included in the model?
-        self.H2 = hydrogen # Is hydrogen included in the model?
-        if not battery: 
-            self.BATTERIES = []
         self._build_model() # build gurobi model
     
     def _build_model(self):
@@ -33,14 +28,6 @@ class EconomicDispatch(Network, CommonMethods):
         self.variables.consumption = {(d,t):self.model.addVar(lb=0,ub=self.P_D[t][d],name='consumption of demand {0}'.format(d)) for d in self.DEMANDS for t in self.TIMES}
         self.variables.generator_dispatch = {(g,t):self.model.addVar(lb=0,ub=self.P_G_max[g],name='dispatch of generator {0}'.format(g)) for g in self.GENERATORS for t in self.TIMES}
         self.variables.wind_turbines = {(w,t):self.model.addVar(lb=0,ub=self.P_W[t][w],name='dispatch of wind turbine {0}'.format(w)) for w in self.WINDTURBINES for t in self.TIMES}
-        if self.H2:
-            # Place one electrolyzer at each wind farm
-            self.variables.hydrogen = {(w,t):self.model.addVar(lb=0,ub=100,name='consumption of electrolyzer {0}'.format(w)) for w in self.WINDTURBINES for t in self.TIMES}
-        if self.battery:
-            # Initialize battery variables with lower and upper bounds on capacity and power
-            self.variables.battery_soc = {(b,t):self.model.addVar(lb=0,ub=self.batt_cap[b],name='soc of battery {0}'.format(b)) for b in self.BATTERIES for t in self.TIMES}
-            self.variables.battery_ch = {(b,t):self.model.addVar(lb=0,ub=self.batt_power[b],name='dispatch of battery {0}'.format(b)) for b in self.BATTERIES for t in self.TIMES}
-            self.variables.battery_dis = {(b,t):self.model.addVar(lb=0,ub=self.batt_power[b],name='consumption of battery {0}'.format(b)) for b in self.BATTERIES for t in self.TIMES}
         
         self.model.update()
         
@@ -51,28 +38,10 @@ class EconomicDispatch(Network, CommonMethods):
         self.model.setObjective(objective, gb.GRB.MAXIMIZE)
         
         # initialize constraints
-        # initialize constraints 
-        ## Step 1 - getting duals for the marginal generator:
-        #self.constraints.generation_constraint_min = {t:self.model.addConstr(
-        #    self.variables.generator_dispatch['G7',t], gb.GRB.GREATER_EQUAL, 0.1, name='Min gen G7') for t in self.TIMES}
-        #self.constraints.generation_constraint_max = {t:self.model.addConstr(
-        #    self.variables.generator_dispatch['G7',t], gb.GRB.LESS_EQUAL, self.P_G_max['G7']-0.1, name='Max gen G7') for t in self.TIMES}
-        
         # Balance constraints
         # Evaluates based on the values of self.battery and self.H2
         self.constraints.balance_constraint = self._add_balance_constraints()
         
-        # ramping constraints
-        if self.ramping:
-            self._add_ramping_constraints()
-
-        # battery constraints
-        if self.battery:
-            self._add_battery_constraints()
-        
-        # electrolyzer constraints
-        if self.H2:
-            self._add_hydrogen_constraints()
         
     def _save_data(self):
         # save objective value
@@ -86,22 +55,6 @@ class EconomicDispatch(Network, CommonMethods):
         
         # save wind turbine dispatches 
         self.data.wind_dispatch_values = {(w,t):self.variables.wind_turbines[w,t].x for w in self.WINDTURBINES for t in self.TIMES}
-
-        # save up and down regulation constraints        
-        if self.ramping:
-            self.data.ramping_up_dual = {t : {g:self.constraints.ramping_up[g,t].Pi for g in self.GENERATORS} for t in self.TIMES[1:]}
-            self.data.ramping_dw_dual = {t : {g:self.constraints.ramping_dw[g,t].Pi for g in self.GENERATORS} for t in self.TIMES[1:]}
-
-        # save battery dispatches
-        if self.battery:
-            self.data.battery = {(b,t):self.variables.battery_ch[b,t].x - self.variables.battery_dis[b,t].x for b in self.BATTERIES for t in self.TIMES}
-            self.data.battery_soc = {(b,t):self.variables.battery_soc[b,t].x for b in self.BATTERIES for t in self.TIMES}
-            self.data.battery_soc_constraint = {(b,t):self.constraints.batt_soc[b,t].Pi for t in self.TIMES[1:] for b in self.BATTERIES}
-        
-        # save electrolyzer activity
-        if self.H2:
-            self.data.hydrogen = {(w,t):self.variables.hydrogen[w,t].x for w in self.WINDTURBINES for t in self.TIMES}
-
         
         # save uniform prices lambda 
         self.data.lambda_ = {t:self.constraints.balance_constraint[t].Pi for t in self.TIMES}
