@@ -5,7 +5,7 @@ import os
 class Network:
     # Reading data from Excel, requires openpyxl
     cwd = os.path.dirname(__file__)
-    xls = pd.ExcelFile(cwd + '/input_data/data.xlsx')
+    xls = pd.ExcelFile(cwd + '/data/data.xlsx')
     
     ## Loading data from Excel sheets
     gen_tech = pd.read_excel(xls, 'gen_technical')
@@ -16,7 +16,10 @@ class Network:
     wind_tech = pd.read_excel(xls, 'wind_technical')
 
     # Loading csv file of normalized wind profiles
-    wind_profiles = pd.read_csv(cwd + '/input_data/wind_profiles.csv')
+    wind_profiles = pd.read_csv(cwd + '/data/wind_profiles.csv')
+
+    # Load investment cost data
+    investment_data = pd.read_excel(cwd + '/data/investment_costs.xlsx').iloc[:,:7].set_index('Metric')
 
     ## Number of each type of unit/identity
     G = np.shape(gen_tech)[0] # Number of generators
@@ -24,6 +27,7 @@ class Network:
     T = np.shape(system_demand)[0] # Number of time periods/hours
     L = np.shape(line_info)[0] # Number of transmission lines
     W = np.shape(wind_tech)[0] # Number of wind farms
+    C = 4 # Number of technologies to invest in
     N = 24 # Number of nodes in network
 
     ## Lists of Generators etc.
@@ -32,6 +36,8 @@ class Network:
     LINES = ['L{0}'.format(t) for t in range(1, L+1)]
     TIMES = ['T{0}'.format(t) for t in range(1, T+1)]
     WINDTURBINES = ['W{0}'.format(t) for t in range(1, W+1)]
+    TECHNOLOGIES = list(investment_data.columns[1:6])
+    #TECHNOLOGIES = ['C{0}'.format(t) for t in range(1, C+1)]
     NODES = ['N{0}'.format(t) for t in range(1, N+1)]
     ZONES = ['Z1', 'Z2', 'Z3']
     
@@ -42,6 +48,13 @@ class Network:
 
     # Node to zone mapping
     map_nz = {n: z for z, ns in map_z.items() for n in ns}
+
+    ## Investment Information
+    investment_data = investment_data.transpose()
+    CAPEX = dict(zip(TECHNOLOGIES, investment_data['CAPEX'][:-1])) # Capital expenditure
+    AF = dict(zip(TECHNOLOGIES, investment_data['AF'][:-1])) # Annualization factor
+    f_OPEX = dict(zip(TECHNOLOGIES, investment_data['f_OPEX'][:-1])) # Fixed operational expenditure
+    v_OPEX = dict(zip(TECHNOLOGIES, investment_data['v_OPEX'][:-1])) # Fixed operational expenditure
     
     ## Conventional Generator Information
     P_G_max = dict(zip(GENERATORS, gen_tech['P_max'])) # Max generation cap.
@@ -146,3 +159,7 @@ class Network:
                     if line in lines_to:
                         self.map_n[node_from][node_to] = line
 
+if __name__ == '__main__':
+    # Testing the Network class
+    network = Network()
+    print(network.map_g)

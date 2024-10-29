@@ -291,3 +291,6 @@ class NodalMarketClearing(Network, CommonMethods):
             # Show the plot
             plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.1)
             plt.show()
+
+ec = NodalMarketClearing('nodal', True, True, True)
+ec.variables.theta
