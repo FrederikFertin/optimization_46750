@@ -19,22 +19,23 @@ class InvestmentPlanning(Network):
         self.BUDGET = 1000 # set budget for capital costs in M€
         self._build_model()
 
-    def _add_lower_level_constraints(self):
-        
+    def _add_lower_level_variables(self):
+        self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.TECHNOLOGIES
         # Fix this, as this is our own production. Need variables for other generators
         # self.variables.p_g = {g: {t: self.model.addVar(lb=0, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
 
         # Define variables of lower level KKTs
+        self.variables.p_g = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
         self.variables.lmd = {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES}
         self.variables.p_d = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.mu_under = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
-        self.variables.mu_over = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
+        self.variables.mu_under = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_over = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.sigma_over = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
-        self.model.update()
-
+    def _add_lower_level_constraints(self):
         # Add lower level constraints. Rewrite to this format
+        pass
         # gen_under = m.addConstrs((-p_G[g,t] * mu_under[g,t] == 0 for g in range(G) for t in range(T)), name = "balance_comp")
         # gen_upper = m.addConstrs(((p_G[g,t] - P_bar[g,t]) * mu_over[g,t] == 0 for g in range(G) for t in range(T)), name = "gen_upper")
         # dem_under = m.addConstrs((-p_D[d,t] * sigma_under[d,t] == 0 for d in range(D) for t in range(T)), name = "dem_under")
