@@ -12,17 +12,12 @@ class expando(object):
 
 class NodalMarketClearing(Network, CommonMethods):
     
-    def __init__(self, model_type: str, ramping: bool, battery: bool, hydrogen: bool, ic_cap = None): # initialize class
+    def __init__(self, model_type: str, ic_cap = None): # initialize class
         super().__init__()
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
         self.constraints = expando() # build constraint attributes
         self.results = expando() # build results attributes
-        self.ramping = ramping # Is ramping constraint enforced?
-        self.battery = battery # Is battery included?
-        self.H2 = hydrogen # Is hydrogen included?
-        if not self.battery:
-            self.BATTERIES = []
         if model_type != 'nodal' and model_type != 'zonal':
             raise ValueError('Model type should be either nodal or zonal')
         else:
@@ -46,12 +41,6 @@ class NodalMarketClearing(Network, CommonMethods):
         elif self.type == 'zonal':
             # Zoanl interconnector flow variables - capacities enforced as lb and ub
             self.variables.ic = {(ic,t):self.model.addVar(lb=-self.ic_cap[ic],ub=self.ic_cap[ic],name='interconnector flow {0}'.format(ic)) for ic in self.INTERCONNECTORS for t in self.TIMES}
-        if self.H2:
-            self.variables.hydrogen = {(w,t):self.model.addVar(lb=0,ub=100,name='consumption of electrolyzer {0}'.format(w)) for w in self.WINDTURBINES for t in self.TIMES}
-        if self.battery:
-            self.variables.battery_soc = {(b,t):self.model.addVar(lb=0,ub=self.batt_cap[b],name='soc of battery {0}'.format(b)) for b in self.BATTERIES for t in self.TIMES}
-            self.variables.battery_ch = {(b,t):self.model.addVar(lb=0,ub=self.batt_power[b],name='dispatch of battery {0}'.format(b)) for b in self.BATTERIES for t in self.TIMES}
-            self.variables.battery_dis = {(b,t):self.model.addVar(lb=0,ub=self.batt_power[b],name='consumption of battery {0}'.format(b)) for b in self.BATTERIES for t in self.TIMES}
         
         self.model.update()
         
@@ -73,17 +62,6 @@ class NodalMarketClearing(Network, CommonMethods):
         if self.type == 'nodal':
             self._add_line_capacity_constraints()
         
-        # ramping constraints
-        if self.ramping:
-            self._add_ramping_constraints()
-
-        # battery constraints
-        if self.battery:
-            self._add_battery_constraints()
-        
-        # electrolyzer constraints
-        if self.H2:
-            self._add_hydrogen_constraints()
 
     def _add_nodal_balance_constraints(self):
         balance_constraints = {}
@@ -99,16 +77,6 @@ class NodalMarketClearing(Network, CommonMethods):
                 
                 # Contribution of wind farms
                 wind_expr = gb.quicksum(self.variables.wind_turbines[w,t] for w in self.map_w[n])
-                if self.H2:
-                    # Contribution of wind farms with hydrogen production
-                    wind_expr = gb.quicksum(self.variables.wind_turbines[w,t] - self.variables.hydrogen[w,t]
-                                for w in self.map_w[n])
-                
-                # Contribution of batteries
-                batt_expr = 0
-                if self.battery:
-                    batt_expr = gb.quicksum(self.variables.battery_ch[b,t] - self.variables.battery_dis[b,t] 
-                                for b in self.map_b[n])
                 
                 # Import of power through lines
                 line_expr = gb.quicksum(self.L_susceptance[line] * (self.variables.theta[n,t] - self.variables.theta[m,t])
@@ -116,7 +84,7 @@ class NodalMarketClearing(Network, CommonMethods):
 
                 # Central balance constraint
                 balance_constraints[t][n] = self.model.addLConstr(
-                                            demand_expr - generator_expr - wind_expr + batt_expr + line_expr,
+                                            demand_expr - generator_expr - wind_expr + line_expr,
                                             gb.GRB.EQUAL,
                                             0, name='Balance equation')
             
@@ -139,16 +107,6 @@ class NodalMarketClearing(Network, CommonMethods):
                 # Contribution of wind farms
                 wind_expr = gb.quicksum(self.variables.wind_turbines[w,t]
                                         for n in self.map_z[z] for w in self.map_w[n])
-                if self.H2:
-                    # Contribution of wind farms with hydrogen production
-                    wind_expr = gb.quicksum(self.variables.wind_turbines[w,t] - self.variables.hydrogen[w,t]
-                                            for n in self.map_z[z] for w in self.map_w[n])
-                
-                # Contribution of batteries
-                batt_expr = 0
-                if self.battery:
-                    gb.quicksum(self.variables.battery_ch[b,t] - self.variables.battery_dis[b,t]
-                                for n in self.map_z[z] for b in self.map_b[n])
                 
                 # Import of power through interconnectors
                 ic_expr = gb.quicksum(self.variables.ic[ic,t]
@@ -156,7 +114,7 @@ class NodalMarketClearing(Network, CommonMethods):
 
                 # Central balance constraint
                 balance_constraints[t][z] = self.model.addLConstr(
-                                            demand_expr - generator_expr - wind_expr + batt_expr + ic_expr,
+                                            demand_expr - generator_expr - wind_expr + ic_expr,
                                             gb.GRB.EQUAL,
                                             0, name='Balance equation')
             
@@ -185,14 +143,6 @@ class NodalMarketClearing(Network, CommonMethods):
         # save wind turbine dispatches 
         self.data.wind_dispatch_values = {(w,t):self.variables.wind_turbines[w,t].x for w in self.WINDTURBINES for t in self.TIMES}
         
-        # save battery dispatches 
-        if self.battery:
-            self.data.battery = {(b,t):self.variables.battery_ch[b,t].x - self.variables.battery_dis[b,t].x for b in self.BATTERIES for t in self.TIMES}
-        
-        # save electrolyzer activity
-        if self.H2:
-            self.data.hydrogen = {(w,t):self.variables.hydrogen[w,t].x for w in self.WINDTURBINES for t in self.TIMES}
-
         # save uniform prices lambda 
         if self.type == 'nodal':
             self.data.lambda_ = {t:{n:self.constraints.balance_constraint[t][n].Pi for n in self.NODES} for t in self.TIMES}
