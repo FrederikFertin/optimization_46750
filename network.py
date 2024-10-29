@@ -3,9 +3,11 @@ import pandas as pd
 import os
 
 class Network:
+    wind = True
+
     # Reading data from Excel, requires openpyxl
     cwd = os.path.dirname(__file__)
-    xls = pd.ExcelFile(cwd + '/data/data.xlsx')
+    xls = pd.ExcelFile(cwd + '/data/grid_data.xlsx')
     
     ## Loading data from Excel sheets
     gen_tech = pd.read_excel(xls, 'gen_technical')
@@ -78,13 +80,13 @@ class Network:
     U_D = {} # Demand bidding price
     for t, key in enumerate(TIMES):
         U_D[key] = dict(zip(DEMANDS, load_info['bid_price'])) # Demand bidding price <- set values in excel
-    U_D['T9']['D13'] = 10.2 # Change the value of a specific demand at a specific time
-    U_D['T9']['D16'] = 7.0 # Change the value of a specific demand at a specific time
+    #U_D['T9']['D13'] = 10.2 # Change the value of a specific demand at a specific time
+    #U_D['T9']['D16'] = 7.0 # Change the value of a specific demand at a specific time
     node_D = dict(zip(DEMANDS, load_info['Node'])) # Load node placements
     U_D_curt = 400 # cost of demand curtailment in BM [$/MWh]
     
     ## Wind Turbine Information
-    p_W_cap = 200 # Wind farm capacities (MW)
+    p_W_cap = 200 * wind # Wind farm capacities (MW)
     WT = ['V{0}'.format(v) for v in wind_tech['Profile']]
     chosen_wind_profiles = wind_profiles[WT] # 'Randomly' chosen production profiles for each wind farm
     P_W = {} # Wind production for each hour and each wind farm
@@ -104,7 +106,10 @@ class Network:
     batt_eta = {'B1': 0.99} # Battery charging and discharging efficiency of 99%
 
     ## Transmission Line Information
-    L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
+    if wind:
+        L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
+    else:
+        L_cap = dict(zip(LINES, line_info['Capacity']))
     L_susceptance = dict(zip(LINES, [500 for i in LINES])) #  Susceptance of transmission line [pu.] 
     L_from = dict(zip(LINES, line_info['From'])) # Origin node of transmission line
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
