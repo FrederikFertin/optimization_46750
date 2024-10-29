@@ -51,10 +51,10 @@ class Network:
 
     ## Investment Information
     investment_data = investment_data.transpose()
-    CAPEX = dict(zip(TECHNOLOGIES, investment_data['CAPEX'][:-1])) # Capital expenditure
-    AF = dict(zip(TECHNOLOGIES, investment_data['AF'][:-1])) # Annualization factor
-    f_OPEX = dict(zip(TECHNOLOGIES, investment_data['f_OPEX'][:-1])) # Fixed operational expenditure
-    v_OPEX = dict(zip(TECHNOLOGIES, investment_data['v_OPEX'][:-1])) # Fixed operational expenditure
+    CAPEX = dict(zip(TECHNOLOGIES, investment_data['CAPEX'][:-1])) # Capital expenditure [M€/MW]
+    AF = dict(zip(TECHNOLOGIES, investment_data['AF'][:-1])) # Annualization factor [%]
+    f_OPEX = dict(zip(TECHNOLOGIES, investment_data['f_OPEX'][:-1]/10**3)) # Fixed operational expenditure [M€/MW/year]
+    v_OPEX = dict(zip(TECHNOLOGIES, investment_data['v_OPEX'][:-1]/10**6)) # Fixed operational expenditure [M€/MWh]
     
     ## Conventional Generator Information
     P_G_max = dict(zip(GENERATORS, gen_tech['P_max'])) # Max generation cap.
