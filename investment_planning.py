@@ -22,7 +22,7 @@ class InvestmentPlanning(Network):
     def _add_lower_level_variables(self):
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.TECHNOLOGIES
         # Fix this, as this is our own production. Need variables for other generators
-        # self.variables.p_g = {g: {t: self.model.addVar(lb=0, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
+        self.variables.p_g = {g: {t: self.model.addVar(lb=0, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.GENERATORS}
 
         # Define variables of lower level KKTs
         self.variables.p_g = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
