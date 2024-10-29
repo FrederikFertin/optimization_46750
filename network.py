@@ -5,7 +5,7 @@ import os
 class Network:
     # Reading data from Excel, requires openpyxl
     cwd = os.path.dirname(__file__)
-    xls = pd.ExcelFile(cwd + '/input_data/data.xlsx')
+    xls = pd.ExcelFile(cwd + '/data/data.xlsx')
     
     ## Loading data from Excel sheets
     gen_tech = pd.read_excel(xls, 'gen_technical')
@@ -16,7 +16,7 @@ class Network:
     wind_tech = pd.read_excel(xls, 'wind_technical')
 
     # Loading csv file of normalized wind profiles
-    wind_profiles = pd.read_csv(cwd + '/input_data/wind_profiles.csv')
+    wind_profiles = pd.read_csv(cwd + '/data/wind_profiles.csv')
 
     ## Number of each type of unit/identity
     G = np.shape(gen_tech)[0] # Number of generators

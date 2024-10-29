@@ -12,7 +12,7 @@ class expando(object):
 
 class NodalMarketClearing(Network, CommonMethods):
     
-    def __init__(self, model_type: str, ic_cap = None): # initialize class
+    def __init__(self, model_type: str): # initialize class
         super().__init__()
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
@@ -22,9 +22,6 @@ class NodalMarketClearing(Network, CommonMethods):
             raise ValueError('Model type should be either nodal or zonal')
         else:
             self.type = model_type
-        if ic_cap is not None:
-            # Overwrite the interconnector capacities if they are provided
-            self.ic_cap = ic_cap
         self._build_model() # build gurobi model
     
     def _build_model(self):
@@ -168,8 +165,6 @@ class NodalMarketClearing(Network, CommonMethods):
     def display_results(self):
         print()
         print("-------------------   RESULTS  -------------------")
-        #print("Market clearing prices: " + str(self.data.lambda_))
-        #print()
         print("Social welfare: " + str(self.data.objective_value))
         print()
         print("Profit of suppliers: ")
