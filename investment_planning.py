@@ -19,9 +19,12 @@ class InvestmentPlanning(Network):
         self._build_model()
 
     def _add_lower_level_constraints(self):
+        
+        # Fix this, as this is our own production. Need variables for other generators
+        # self.variables.p_g = {g: {t: self.model.addVar(lb=0, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
+
         # Define variables of lower level KKTs
         self.variables.lmd = {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES}
-        self.variables.p_g = {g: {t: self.model.addVar(lb=0, ub=self.P_G_max[g], name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
         self.variables.p_d = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.mu_under = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
         self.variables.mu_over = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
@@ -30,9 +33,13 @@ class InvestmentPlanning(Network):
 
         self.model.update()
 
-        # Add lower level constraints
-        self.constraints.gen_constr = {g: {t: self.model.addConstr(self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t],
-                                                                    gb.GRB.LESS_EQUAL, self.P_G_max[g], name='Generation upper bound for {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
+        # Add lower level constraints. Rewrite to this format
+        # gen_under = m.addConstrs((-p_G[g,t] * mu_under[g,t] == 0 for g in range(G) for t in range(T)), name = "balance_comp")
+        # gen_upper = m.addConstrs(((p_G[g,t] - P_bar[g,t]) * mu_over[g,t] == 0 for g in range(G) for t in range(T)), name = "gen_upper")
+        # dem_under = m.addConstrs((-p_D[d,t] * sigma_under[d,t] == 0 for d in range(D) for t in range(T)), name = "dem_under")
+        # dem_upper = m.addConstrs(((p_D[d,t] - D_bar[d,t]) * sigma_over[d,t] == 0 for d in range(D) for t in range(T)), name = "dem_upper")
+
+        # balance = m.addConstrs((sum(p_G[g,t] for g in range(G)) - sum(p_D[d,t] for d in range(D)) == 0 for t in range(T)), name = "balance")
 
     def _build_model(self):
         self.model = gb.Model(name='Investment Planning')
