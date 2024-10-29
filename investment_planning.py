@@ -31,7 +31,8 @@ class InvestmentPlanning(Network):
         self.model.update()
 
         # Add lower level constraints
-        
+        self.constraints.gen_constr = {g: {t: self.model.addConstr(self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t],
+                                                                    gb.GRB.LESS_EQUAL, self.P_G_max[g], name='Generation upper bound for {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.TECHNOLOGIES}
 
     def _build_model(self):
         self.model = gb.Model(name='Investment Planning')
