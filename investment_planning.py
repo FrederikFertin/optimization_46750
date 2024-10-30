@@ -34,7 +34,10 @@ class InvestmentPlanning(Network):
         self.variables.sigma_over  = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
     def _add_lower_level_constraints(self):
+        # Implement eq 13 + 14
         self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
+
+        # Fix P_bar and create seperate for our production units
         self.constraints.gen_upper = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_bar[g][t]) * self.variables.mu_over[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_upper")
         self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_upper = self.model.addConstrs(((self.variables.p_d[d][t] - self.D_bar[d][t]) * self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_upper")
@@ -54,10 +57,10 @@ class InvestmentPlanning(Network):
         """ Initialize objective to maximize NPV [M€] """
         # Define costs (annualized capital costs + fixed and variable operational costs)
         costs = gb.quicksum( self.variables.P_investment[g] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.n_hours * gb.quicksum(self.v_OPEX[g] * self.variables.p_g[g][t] for t in self.TIMES)
+                            + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.variables.p_g[g][t] for t in self.TIMES)
                             for g in self.TECHNOLOGIES)
         # Define revenue (sum of generation revenues)
-        revenue = gb.quicksum(self.variables.lmd[t] * self.variables.p_g[g][t] for g in self.TECHNOLOGIES for t in self.TIMES)
+        revenue = 8760/self.T * gb.quicksum(self.variables.lmd[t] * self.variables.p_g[g][t] for g in self.TECHNOLOGIES for t in self.TIMES)
         # Define NPV
         npv = revenue - costs
         # Set objective
