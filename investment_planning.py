@@ -21,10 +21,9 @@ class InvestmentPlanning(Network):
 
     def _add_lower_level_variables(self):
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.TECHNOLOGIES
-        # Fix this, as this is our own production. Need variables for other generators
-        self.variables.p_g = {g: {t: self.model.addVar(lb=0, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.GENERATORS}
 
         # Define variables of lower level KKTs
+        self.variables.p_g = {g: {t: self.model.addVar(lb=0, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.GENERATORS}
         self.variables.p_g = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
         self.variables.lmd = {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES}
         self.variables.p_d = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
@@ -34,14 +33,11 @@ class InvestmentPlanning(Network):
         self.variables.sigma_over = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
     def _add_lower_level_constraints(self):
-        # Add lower level constraints. Rewrite to this format
-        pass
-        # gen_under = m.addConstrs((-p_G[g,t] * mu_under[g,t] == 0 for g in range(G) for t in range(T)), name = "balance_comp")
-        # gen_upper = m.addConstrs(((p_G[g,t] - P_bar[g,t]) * mu_over[g,t] == 0 for g in range(G) for t in range(T)), name = "gen_upper")
-        # dem_under = m.addConstrs((-p_D[d,t] * sigma_under[d,t] == 0 for d in range(D) for t in range(T)), name = "dem_under")
-        # dem_upper = m.addConstrs(((p_D[d,t] - D_bar[d,t]) * sigma_over[d,t] == 0 for d in range(D) for t in range(T)), name = "dem_upper")
-
-        # balance = m.addConstrs((sum(p_G[g,t] for g in range(G)) - sum(p_D[d,t] for d in range(D)) == 0 for t in range(T)), name = "balance")
+        self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
+        self.constraints.gen_upper = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_bar[g][t]) * self.variables.mu_over[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_upper")
+        self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
+        self.constraints.dem_upper = self.model.addConstrs(((self.variables.p_d[d][t] - self.D_bar[d][t]) * self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_upper")
+        self.constraints.balance   = self.model.addConstrs((sum(self.variables.p_g[g][t] for g in self.PRODUCTION_UNITS) - sum(self.variables.p_d[d][t] for d in self.DEMANDS) == 0  for t in self.TIMES), name = "balance")
 
     def _build_model(self):
         self.model = gb.Model(name='Investment Planning')
@@ -99,3 +95,7 @@ class InvestmentPlanning(Network):
         print('Investment Values: {0}'.format(self.data.investment_values))
 
 
+if __name__ == '__main__':
+    ip = InvestmentPlanning()
+    ip.run()
+    ip.display_results()
