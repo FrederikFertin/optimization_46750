@@ -29,7 +29,7 @@ class Network:
     T = np.shape(system_demand)[0] # Number of time periods/hours
     L = np.shape(line_info)[0] # Number of transmission lines
     W = np.shape(wind_tech)[0] # Number of wind farms
-    C = 4 # Number of technologies to invest in
+    # C = 5 # Number of technologies to invest in
     N = 24 # Number of nodes in network
 
     ## Lists of Generators etc.
@@ -38,7 +38,7 @@ class Network:
     LINES = ['L{0}'.format(t) for t in range(1, L+1)]
     TIMES = ['T{0}'.format(t) for t in range(1, T+1)]
     WINDTURBINES = ['W{0}'.format(t) for t in range(1, W+1)]
-    TECHNOLOGIES = list(investment_data.columns[1:6])
+    INVESTMENTS = list(investment_data.columns[0:5])
     #TECHNOLOGIES = ['C{0}'.format(t) for t in range(1, C+1)]
     NODES = ['N{0}'.format(t) for t in range(1, N+1)]
     ZONES = ['Z1', 'Z2', 'Z3']
@@ -53,10 +53,11 @@ class Network:
 
     ## Investment Information
     investment_data = investment_data.transpose()
-    CAPEX = dict(zip(TECHNOLOGIES, investment_data['CAPEX'][:-1])) # Capital expenditure [M€/MW]
-    AF = dict(zip(TECHNOLOGIES, investment_data['AF'][:-1])) # Annualization factor [%]
-    f_OPEX = dict(zip(TECHNOLOGIES, investment_data['f_OPEX'][:-1]/10**3)) # Fixed operational expenditure [M€/MW/year]
-    v_OPEX = dict(zip(TECHNOLOGIES, investment_data['v_OPEX'][:-1]/10**6)) # Fixed operational expenditure [M€/MWh]
+    CAPEX = dict(zip(INVESTMENTS, investment_data['CAPEX'][:-1]*10**6)) # Capital expenditure [€/MW]
+    print(CAPEX)
+    AF = dict(zip(INVESTMENTS, investment_data['AF'][:-1])) # Annualization factor [%]
+    f_OPEX = dict(zip(INVESTMENTS, investment_data['f_OPEX'][:-1]*10**3)) # Fixed operational expenditure [€/MW/year]
+    v_OPEX = dict(zip(INVESTMENTS, investment_data['v_OPEX'][:-1])) # Fixed operational expenditure [€/MWh]
     
     ## Conventional Generator Information
     P_G_max = dict(zip(GENERATORS, gen_tech['P_max'])) # Max generation cap.
