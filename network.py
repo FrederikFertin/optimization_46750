@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 class Network:
-    wind = True
+    wind = False
 
     # Reading data from Excel, requires openpyxl
     cwd = os.path.dirname(__file__)
@@ -23,6 +23,9 @@ class Network:
     # Load investment cost data
     investment_data = pd.read_excel(cwd + '/data/investment_costs.xlsx').iloc[:,:7].set_index('Metric')
 
+    # Production profiles for wind and solar
+    
+
     ## Number of each type of unit/identity
     G = np.shape(gen_tech)[0] # Number of generators
     D = np.shape(load_info)[0] # Number of loads/demands
@@ -37,7 +40,11 @@ class Network:
     DEMANDS = ['D{0}'.format(t) for t in range(1, D+1)]
     LINES = ['L{0}'.format(t) for t in range(1, L+1)]
     TIMES = ['T{0}'.format(t) for t in range(1, T+1)]
-    WINDTURBINES = ['W{0}'.format(t) for t in range(1, W+1)]
+    
+    if wind:
+        WINDTURBINES = ['W{0}'.format(t) for t in range(1, W+1)]
+    else:
+        WINDTURBINES = []
     INVESTMENTS = list(investment_data.columns[0:5])
     #TECHNOLOGIES = ['C{0}'.format(t) for t in range(1, C+1)]
     NODES = ['N{0}'.format(t) for t in range(1, N+1)]
@@ -53,11 +60,10 @@ class Network:
 
     ## Investment Information
     investment_data = investment_data.transpose()
-    CAPEX = dict(zip(INVESTMENTS, investment_data['CAPEX'][:-1]*10**6)) # Capital expenditure [€/MW]
-    print(CAPEX)
+    CAPEX = dict(zip(INVESTMENTS, investment_data['CAPEX'][:-1])) # Capital expenditure [M€/MW]
     AF = dict(zip(INVESTMENTS, investment_data['AF'][:-1])) # Annualization factor [%]
-    f_OPEX = dict(zip(INVESTMENTS, investment_data['f_OPEX'][:-1]*10**3)) # Fixed operational expenditure [€/MW/year]
-    v_OPEX = dict(zip(INVESTMENTS, investment_data['v_OPEX'][:-1])) # Fixed operational expenditure [€/MWh]
+    f_OPEX = dict(zip(INVESTMENTS, investment_data['f_OPEX'][:-1]/10**3)) # Fixed operational expenditure [M€/MW/year]
+    v_OPEX = dict(zip(INVESTMENTS, investment_data['v_OPEX'][:-1]/10**6)) # Fixed operational expenditure [M€/MWh]
     
     ## Conventional Generator Information
     P_G_max = dict(zip(GENERATORS, gen_tech['P_max'])) # Max generation cap.
