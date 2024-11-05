@@ -67,10 +67,12 @@ class InvestmentPlanning(Network):
         self.variables.y = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='y_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
     def _add_lower_level_constraints(self):
         M = 1000 # Temp Big M for binary variables
+
         # KKT for lagrange objective derived wrt. generation variables
         self.constraints.gen_lagrange_generators = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
         self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
         self.constraints.gen_lagrange_investments = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
+        
         # KKT for lagrange objective derived wrt. demand variables
         self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[t][d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
         
@@ -173,6 +175,6 @@ class InvestmentPlanning(Network):
 
 
 if __name__ == '__main__':
-    ip = InvestmentPlanning()
+    ip = InvestmentPlanning(hours=24, budget=100, timelimit=100)
     ip.run()
     ip.display_results()
