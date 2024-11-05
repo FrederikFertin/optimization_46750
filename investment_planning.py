@@ -1,6 +1,7 @@
 import gurobipy as gb
 from network import Network
 from gurobipy import GRB
+import numpy as np
 
 class expando(object):
     '''
@@ -10,16 +11,42 @@ class expando(object):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self): # initialize class
+    def __init__(self, hours:int = 1, budget:float = 100, timelimit:float=100): # initialize class
         super().__init__()
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
         self.constraints = expando() # build constraint attributes
         self.results = expando() # build results attributes
+        
+        self.T = hours
+        self.offshore_flux = np.ones(hours)
+        self.solar_flux = np.ones(hours)
+        self.gas_flux = np.ones(hours)
+        self.nuclear_flux = np.ones(hours)
+        self.onshore_flux = np.ones(hours)
 
-        self.BUDGET = 10 # set budget for capital costs in € (1 billion €)
-        self.TIMES = [self.TIMES[0]]
-        self.T = len(self.TIMES)
+        if hours >= 24:
+            assert hours % 24 == 0, "Hours must be a multiple of 24"
+            days = hours // 24
+            chosen_days = np.random.choice(range(365), days, replace=False)
+            self.cf = {g: 1 for g in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
+
+            self.offshore_flux = np.concatenate([self.wind_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
+            self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
+            self.onshore_flux = self.offshore_flux * 0.8
+            self.TIMES = ['T{0}'.format(t) for t in range(1, 24+1)] * days
+        else:
+            self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
+
+        # Establish fluxes (primarily capping generation capacities of renewables)
+        self.fluxes = {'Onshore Wind': self.onshore_flux,
+                       'Offshore Wind': self.offshore_flux,
+                       'Solar': self.solar_flux,
+                       'Nuclear': self.nuclear_flux,
+                       'Gas': self.gas_flux}
+        self.BUDGET = budget # set budget for capital costs in M€
+        self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
+
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
 
         self._build_model()
@@ -47,14 +74,14 @@ class InvestmentPlanning(Network):
         # KKT for generation capacities
         self.constraints.gen_upper_generators = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_G_max[g]) * self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "gen_upper_generators")
         self.constraints.gen_upper_windturbines = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_W[t][g]) * self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "gen_upper_windturbines")
-        self.constraints.gen_upper_investments = self.model.addConstrs(((self.variables.p_g[g][t] - self.variables.P_investment[g]) * self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments")
+        self.constraints.gen_upper_investments = self.model.addConstrs(((self.variables.p_g[g][t] - self.variables.P_investment[g] * self.fluxes[g][t_ix]) * self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments")
         # KKT for demand constraints
         self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_upper = self.model.addConstrs(((self.variables.p_d[d][t] - self.P_D[t][d]) * self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_upper")
         # Generation capacity limits
         self.constraints.gen_cap_generators = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_cap_generators")
         self.constraints.gen_cap_windturbines = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_W[t][g] for g in self.WINDTURBINES for t in self.TIMES), name = "gen_cap_windturbines")
-        self.constraints.gen_cap_investments = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_cap_investments")
+        self.constraints.gen_cap_investments = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_cap_investments")
         # Demand magnitude constraints
         self.constraints.dem_mag = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES), name = "dem_mag")
         # KKT for balancing constraint
@@ -63,8 +90,8 @@ class InvestmentPlanning(Network):
     def _build_model(self):
         self.model = gb.Model(name='Investment Planning')
 
-        self.model.Params.TIME_LIMIT = 100.0 # set time limit for optimization to 100 secondss
-
+        self.model.Params.TIME_LIMIT = self.timelimit # set time limit for optimization to 100 seconds
+        self.model.Params.Seed = 42 # set seed for reproducibility
         """ Initialize variables """
         # Investment in generation technologies (in MW)
         self.variables.P_investment = {g : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for g in self.INVESTMENTS}
@@ -79,12 +106,12 @@ class InvestmentPlanning(Network):
         costs = gb.quicksum( self.variables.P_investment[g] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
                             + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.variables.p_g[g][t] for t in self.TIMES)
                             for g in self.INVESTMENTS)
-        # Define revenue (sum of generation revenues) [€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(
+        # Define revenue (sum of generation revenues) [M€]
+        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
                                             self.variables.lmd[t] * self.variables.p_g[g][t]
                                             for g in self.INVESTMENTS for t in self.TIMES)
         # Define NPV
-        npv = 20 * revenue - costs
+        npv = 3 * revenue - costs
         # Set objective
         self.model.setObjective(npv, gb.GRB.MAXIMIZE)
 
@@ -95,7 +122,8 @@ class InvestmentPlanning(Network):
         self.constraints.budget = self.model.addConstr(gb.quicksum(
                                     self.variables.P_investment[g] * self.CAPEX[g] for g in self.INVESTMENTS)
                                     <= self.BUDGET, name='budget')
-
+        # Investment constraints
+        self.constraints.investment = self.model.addConstrs((self.variables.P_investment[g] <= 200 for g in self.INVESTMENTS), name='investment')
         self._add_lower_level_constraints()
 
         # Set non-convex objective
