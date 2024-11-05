@@ -63,6 +63,8 @@ class InvestmentPlanning(Network):
     def _build_model(self):
         self.model = gb.Model(name='Investment Planning')
 
+        self.model.Params.TIME_LIMIT = 100.0 # set time limit for optimization to 100 secondss
+
         """ Initialize variables """
         # Investment in generation technologies (in MW)
         self.variables.P_investment = {g : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for g in self.INVESTMENTS}
