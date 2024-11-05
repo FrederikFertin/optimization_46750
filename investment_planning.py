@@ -66,13 +66,14 @@ class InvestmentPlanning(Network):
         self.variables.z = {g: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='z_{0}_{1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
         self.variables.y = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='y_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
     def _add_lower_level_constraints(self):
-        M = 1000 # Big M for binary variables
+        M = 1000 # Temp Big M for binary variables
         # KKT for lagrange objective derived wrt. generation variables
         self.constraints.gen_lagrange_generators = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
         self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
         self.constraints.gen_lagrange_investments = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
         # KKT for lagrange objective derived wrt. demand variables
         self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[t][d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
+        
         # KKT for generation minimal production
         # self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_under_1")
@@ -84,18 +85,22 @@ class InvestmentPlanning(Network):
         self.constraints.gen_upper_generators = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_G_max[g]) * self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "gen_upper_generators")
         self.constraints.gen_upper_windturbines = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_W[t][g]) * self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "gen_upper_windturbines")
         self.constraints.gen_upper_investments = self.model.addConstrs(((self.variables.p_g[g][t] - self.variables.P_investment[g] * self.fluxes[g][t_ix]) * self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments")
+        
         # KKT for demand constraints
         # self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.y[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.y[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         
         self.constraints.dem_upper = self.model.addConstrs(((self.variables.p_d[d][t] - self.P_D[t][d]) * self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_upper")
+        
         # Generation capacity limits
         self.constraints.gen_cap_generators = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_cap_generators")
         self.constraints.gen_cap_windturbines = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_W[t][g] for g in self.WINDTURBINES for t in self.TIMES), name = "gen_cap_windturbines")
         self.constraints.gen_cap_investments = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_cap_investments")
+        
         # Demand magnitude constraints
         self.constraints.dem_mag = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES), name = "dem_mag")
+        
         # KKT for balancing constraint
         self.constraints.balance = self.model.addConstrs((gb.quicksum(self.variables.p_g[g][t] for g in self.PRODUCTION_UNITS) - gb.quicksum(self.variables.p_d[d][t] for d in self.DEMANDS) == 0  for t in self.TIMES), name = "balance")
 
