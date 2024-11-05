@@ -24,7 +24,11 @@ class Network:
     investment_data = pd.read_excel(cwd + '/data/investment_costs.xlsx').iloc[:,:7].set_index('Metric')
 
     # Production profiles for wind and solar
-    
+    wind_hourly_2019 = pd.read_csv(cwd + '/data/wind_hourly_2019.csv', skiprows=3)['electricity']/1000 # Wind production profiles for a 1 MW wind farm [pu]
+    solar_hourly_2019 = pd.read_csv(cwd + '/data/pv_hourly_2019.csv', skiprows=3)['electricity']/1000 # Solar production profiles for a 1 MW solar farm [pu]
+    wind_cf = sum(wind_hourly_2019)/len(wind_hourly_2019) # Wind capacity factor
+    solar_cf = sum(solar_hourly_2019)/len(solar_hourly_2019) # Solar capacity factor
+    cf = {'Onshore Wind': wind_cf*0.8, 'Offshore Wind': wind_cf, 'Solar': solar_cf, 'Nuclear': 1, 'Gas': 1}
 
     ## Number of each type of unit/identity
     G = np.shape(gen_tech)[0] # Number of generators
