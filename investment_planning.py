@@ -100,8 +100,8 @@ class InvestmentPlanning(Network):
         self.constraints.gen_upper_windturbines_3 = self.model.addConstrs((self.variables.mu_over[g][t] <= M * (1 - self.variables.q[g][t]) for g in self.WINDTURBINES for t in self.TIMES), name = "gen_upper_windturbines_3")
 
         # self.constraints.gen_upper_investments = self.model.addConstrs(((self.variables.p_g[g][t] - self.variables.P_investment[g] * self.fluxes[g][t_ix]) * self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments")
-        self.constraints.gen_upper_investments_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] + M * self.variables.q[g][t] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_1")
-        self.constraints.gen_upper_investments_2 = self.model.addConstrs((self.variables.P_investment[g] - M * self.variables.q[g][t] <= self.variables.p_g[g][t] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_2")
+        self.constraints.gen_upper_investments_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] + M * self.variables.q[g][t] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_1")
+        self.constraints.gen_upper_investments_2 = self.model.addConstrs((self.variables.P_investment[g] * self.fluxes[g][t_ix] - M * self.variables.q[g][t] <= self.variables.p_g[g][t] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_2")
         self.constraints.gen_upper_investments_3 = self.model.addConstrs((self.variables.mu_over[g][t] <= M * (1 - self.variables.q[g][t]) for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_3")
 
         # KKT for demand constraints. Bi-linear are replaced by linearized constraints
