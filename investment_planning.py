@@ -25,6 +25,7 @@ class InvestmentPlanning(Network):
         self.gas_flux = np.ones(hours)
         self.nuclear_flux = np.ones(hours)
         self.onshore_flux = np.ones(hours)
+        #self.AF["Nuclear"] = 0.02
 
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -32,9 +33,9 @@ class InvestmentPlanning(Network):
             chosen_days = np.random.choice(range(365), days, replace=False)
             self.cf = {g: 1 for g in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
 
-            self.offshore_flux = np.concatenate([self.wind_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
+            self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
-            self.onshore_flux = self.offshore_flux * 0.8
+            self.onshore_flux = np.concatenate([self.onshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.TIMES = ['T{0}'.format(t) for t in range(1, 24+1)] * days
         else:
             self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
@@ -71,7 +72,7 @@ class InvestmentPlanning(Network):
     
     def _add_lower_level_constraints(self):
         M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
-
+        
         # KKT for lagrange objective derived wrt. generation variables
         self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
         self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
@@ -153,7 +154,7 @@ class InvestmentPlanning(Network):
                                             for g in self.INVESTMENTS for t in self.TIMES)
         
         # Define NPV, including magic constant
-        npv = 3*revenue - costs
+        npv = 2.5*revenue - costs
 
         # Set objective
         self.model.setObjective(npv, gb.GRB.MAXIMIZE)
@@ -165,8 +166,7 @@ class InvestmentPlanning(Network):
         self.constraints.budget = self.model.addConstr(gb.quicksum(
                                     self.variables.P_investment[g] * self.CAPEX[g] for g in self.INVESTMENTS)
                                     <= self.BUDGET, name='budget')
-        # Investment constraints
-        self.constraints.investment = self.model.addConstrs((self.variables.P_investment[g] <= 200 for g in self.INVESTMENTS), name='investment')
+        
         self._add_lower_level_constraints()
 
         # Set non-convex objective
@@ -196,11 +196,13 @@ class InvestmentPlanning(Network):
         print('Investment Capacities:')
         for key, value in self.data.investment_values.items():
             print(f"{key}: \t\t{round(value,2)}MW")
+            print(f"Capital cost: \t\t{round(value*self.CAPEX[key],2)}M€\n")
+
 
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=72, budget=100, timelimit=100)
+    ip = InvestmentPlanning(hours=30*24, budget=450, timelimit=100)
     # Run optimization
     ip.run()
     # Display results
