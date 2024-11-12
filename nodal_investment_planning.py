@@ -60,21 +60,26 @@ class InvestmentPlanning(Network):
 
     def _add_lower_level_variables(self):
         # Define variables of lower level KKTs
-        self.variables.p_g = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.p_d = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.lmd = {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} # Hourly spot price (€/MWh)
+        self.variables.p_g   = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.p_d   = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.lmd   = {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} # Hourly spot price (€/MWh)
+        self.variables.theta = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='theta_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
+
         
-        self.variables.mu_under    = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.mu_over     = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_under    = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_over     = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.sigma_over  = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
-        # Add binary auxiliary variables for bi-linear constraints
-        self.variables.q = {g: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='q_{0}_{1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.z = {g: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='z_{0}_{1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.y = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='y_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.x = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='x_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-    
+        # Add binary auxiliary variables for non-convex constraints
+        self.variables.b1 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.b2 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b2_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.b3 = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b3_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.b4 = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b4_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.b5 = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b5_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
+        self.variables.b6 = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b6_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
+
+
     def _add_lower_level_constraints(self):
         M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
         
