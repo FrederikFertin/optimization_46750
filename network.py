@@ -25,12 +25,17 @@ class Network:
 
     # Production profiles for wind and solar
     offshore_hourly_2019 = pd.read_csv(cwd + '/data/offshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
-    onshore_hourly_2019 = pd.read_csv(cwd + '/data/offshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
+    onshore_hourly_2019 = pd.read_csv(cwd + '/data/onshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
     solar_hourly_2019 = pd.read_csv(cwd + '/data/pv_hourly_2019.csv', skiprows=3)['electricity'] # Solar production profiles for a 1 MW solar farm [pu]
     offshore_cf = sum(offshore_hourly_2019) / len(offshore_hourly_2019) # Offshore capacity factor
     onshore_cf = sum(onshore_hourly_2019) / len(onshore_hourly_2019) # Onshore capacity factor
     solar_cf = sum(solar_hourly_2019) / len(solar_hourly_2019) # Solar capacity factor
-    cf = {'Onshore Wind': onshore_cf, 'Offshore Wind': offshore_cf, 'Solar': solar_cf, 'Nuclear': 1, 'Gas': 1}
+    cf = {'Solar': solar_cf, 'Onshore Wind': onshore_cf, 'Offshore Wind': offshore_cf, 'Nuclear': 0.9, 'Gas': 0.7}
+
+    # Demand profiles
+    demand_flux = pd.read_excel(cwd + '/data/load2023.xlsx').iloc[1:, :]
+    demand_hourly = demand_flux[['Unnamed: 2']]
+    demand_hourly.columns = ['Demand']
 
     ## Number of each type of unit/identity
     G = np.shape(gen_tech)[0] # Number of generators
@@ -51,11 +56,11 @@ class Network:
         WINDTURBINES = ['W{0}'.format(t) for t in range(1, W+1)]
     else:
         WINDTURBINES = []
-    INVESTMENTS = list(investment_data.columns[0:5])
-    #TECHNOLOGIES = ['C{0}'.format(t) for t in range(1, C+1)]
+    INVESTMENTS = list(investment_data.columns[0:5])    
+    
     NODES = ['N{0}'.format(t) for t in range(1, N+1)]
     ZONES = ['Z1', 'Z2', 'Z3']
-    
+
     # Zone to node mapping
     map_z = {'Z1': ['N17', 'N18', 'N21', 'N22'],
              'Z2': ['N11', 'N12', 'N13', 'N14', 'N15', 'N16', 'N19', 'N20', 'N23', 'N24'],
@@ -70,7 +75,10 @@ class Network:
     AF = dict(zip(INVESTMENTS, investment_data['AF'][:-1])) # Annualization factor [%]
     f_OPEX = dict(zip(INVESTMENTS, investment_data['f_OPEX'][:-1]/10**3)) # Fixed operational expenditure [M€/MW/year]
     v_OPEX = dict(zip(INVESTMENTS, investment_data['v_OPEX'][:-1]/10**6)) # Fixed operational expenditure [M€/MWh]
-    
+    LCOE = {}
+    for key in INVESTMENTS:
+        LCOE[key] = ((CAPEX[key] * AF[key] + f_OPEX[key])/(cf[key]*8760) + v_OPEX[key]) * 10**6
+
     ## Conventional Generator Information
     P_G_max = dict(zip(GENERATORS, gen_tech['P_max'])) # Max generation cap.
     P_G_min = dict(zip(GENERATORS, gen_tech['P_min'])) # Min generation cap.
@@ -88,13 +96,9 @@ class Network:
     P_D_sum = dict(zip(TIMES, system_demand['System_demand'])) # Total hourly system demands [MWh]
     P_D = {} # Distribution of system demands
     for t, key in enumerate(TIMES):
-        P_D[key] = dict(zip(DEMANDS, load_info['load_percent']/100*system_demand['System_demand'][t]))
+        P_D[key] = dict(zip(DEMANDS, load_info['load_percent']/100 * system_demand['System_demand'][t]))
     
-    U_D = {} # Demand bidding price
-    for t, key in enumerate(TIMES):
-        U_D[key] = dict(zip(DEMANDS, load_info['bid_price'])) # Demand bidding price <- set values in excel
-    #U_D['T9']['D13'] = 10.2 # Change the value of a specific demand at a specific time
-    #U_D['T9']['D16'] = 7.0 # Change the value of a specific demand at a specific time
+    U_D = dict(zip(DEMANDS, load_info['bid_price'])) # Demand bidding price <- set values in excel
     node_D = dict(zip(DEMANDS, load_info['Node'])) # Load node placements
     U_D_curt = 400 # cost of demand curtailment in BM [$/MWh]
     
@@ -180,4 +184,4 @@ class Network:
 if __name__ == '__main__':
     # Testing the Network class
     network = Network()
-    print(network.map_g)
+    print(network.LCOE)

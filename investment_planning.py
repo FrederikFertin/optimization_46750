@@ -12,7 +12,7 @@ class expando(object):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 1, budget:float = 100, timelimit:float=100): # initialize class
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100): # initialize class
         super().__init__()
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
@@ -36,9 +36,15 @@ class InvestmentPlanning(Network):
             self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.onshore_flux = np.concatenate([self.onshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
-            self.TIMES = ['T{0}'.format(t) for t in range(1, 24+1)] * days
+            self.demand_profiles = np.concatenate([self.demand_hourly.iloc[d*24: (d+1)*24]['Demand'].values for d in chosen_days])
+            self.TIMES = ['T{0}'.format(t) for t in range(1, days*24+1)]
+            self.P_D = {} # Distribution of system demands
+            for t, key in enumerate(self.TIMES):
+                self.P_D[key] = dict(zip(self.DEMANDS, self.load_info['load_percent']/100 * self.demand_profiles[t]))
+            #self.HOURS = ['T{0}'.format(t) for t in range(1, 24+1)]*days
         else:
             self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
+            #self.HOURS = self.TIMES
 
         # Establish fluxes (primarily capping generation capacities of renewables)
         self.fluxes = {'Onshore Wind': self.onshore_flux,
@@ -77,7 +83,7 @@ class InvestmentPlanning(Network):
         self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
         
         # KKT for lagrange objective derived wrt. demand variables
-        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[t][d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
+        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
         
         # KKT for generation minimal production. Bi-linear are replaced by linearized constraints
         # self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
@@ -200,7 +206,7 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=30*24, budget=450, timelimit=100)
+    ip = InvestmentPlanning(hours=2*24, budget=450, timelimit=200)
     # Build model
     ip.build_model()
     # Run optimization
