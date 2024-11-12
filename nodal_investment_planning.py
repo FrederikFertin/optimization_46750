@@ -140,7 +140,7 @@ class InvestmentPlanning(Network):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for g in self.INVESTMENTS}
+        self.variables.P_investment = {i : {n : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in tech {0} at node {1}'.format(i, n)) for n in self.NODES} for i in self.INVESTMENTS}
         
         # Get lower level variables
         self._add_lower_level_variables()
@@ -149,13 +149,13 @@ class InvestmentPlanning(Network):
 
         """ Initialize objective to maximize NPV [M€] """
         # Define costs (annualized capital costs + fixed and variable operational costs)
-        costs = gb.quicksum( self.variables.P_investment[g] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.variables.p_g[g][t] for t in self.TIMES)
-                            for g in self.INVESTMENTS)
+        costs = gb.quicksum( self.variables.P_investment[i][n] * (self.AF[i] * self.CAPEX[i] + self.f_OPEX[i])
+                            + 8760/self.T * gb.quicksum(self.v_OPEX[i] * self.variables.p_g[i][n][t] for t in self.TIMES)
+                            for i in self.INVESTMENTS for n in self.NODES)
         # Define revenue (sum of generation revenues) [M€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
-                                            self.variables.lmd[t] * self.variables.p_g[g][t]
-                                            for g in self.INVESTMENTS for t in self.TIMES)
+        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[i] * 
+                                            self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
+                                            for i in self.INVESTMENTS for t in self.TIMES for n in self.NODES)
         
         # Define NPV, including magic constant
         npv = revenue - costs
