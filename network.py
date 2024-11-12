@@ -27,9 +27,9 @@ class Network:
     offshore_hourly_2019 = pd.read_csv(cwd + '/data/offshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
     onshore_hourly_2019 = pd.read_csv(cwd + '/data/offshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
     solar_hourly_2019 = pd.read_csv(cwd + '/data/pv_hourly_2019.csv', skiprows=3)['electricity'] # Solar production profiles for a 1 MW solar farm [pu]
-    offshore_cf = sum(offshore_hourly_2019)/len(offshore_hourly_2019) # Offshore capacity factor
-    onshore_cf = sum(onshore_hourly_2019)/len(onshore_hourly_2019) # Onshore capacity factor
-    solar_cf = sum(solar_hourly_2019)/len(solar_hourly_2019) # Solar capacity factor
+    offshore_cf = sum(offshore_hourly_2019) / len(offshore_hourly_2019) # Offshore capacity factor
+    onshore_cf = sum(onshore_hourly_2019) / len(onshore_hourly_2019) # Onshore capacity factor
+    solar_cf = sum(solar_hourly_2019) / len(solar_hourly_2019) # Solar capacity factor
     cf = {'Onshore Wind': onshore_cf, 'Offshore Wind': offshore_cf, 'Solar': solar_cf, 'Nuclear': 1, 'Gas': 1}
 
     ## Number of each type of unit/identity

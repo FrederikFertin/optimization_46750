@@ -1,5 +1,6 @@
 import gurobipy as gb
 from network import Network
+from investment_planning import InvestmentPlanning
 from gurobipy import GRB
 import numpy as np
 import random
@@ -10,14 +11,10 @@ class expando(object):
     '''
     pass
 
-class InvestmentPlanning(Network):
+class NodalInvestmentPlanning(InvestmentPlanning):
     
     def __init__(self, hours:int = 1, budget:float = 100, timelimit:float=100): # initialize class
-        super().__init__()
-        self.data = expando() # build data attributes
-        self.variables = expando() # build variable attributes
-        self.constraints = expando() # build constraint attributes
-        self.results = expando() # build results attributes
+        super().__init__(hours=hours, budget=budget, timelimit=timelimit)
         
         self.T = hours
         self.offshore_flux = np.ones(hours)
@@ -50,6 +47,8 @@ class InvestmentPlanning(Network):
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
 
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
+
+        self._build_model()
 
     def _add_lower_level_variables(self):
         # Define variables of lower level KKTs
@@ -126,7 +125,7 @@ class InvestmentPlanning(Network):
         # KKT for balancing constraint
         self.constraints.balance = self.model.addConstrs((gb.quicksum(self.variables.p_g[g][t] for g in self.PRODUCTION_UNITS) - gb.quicksum(self.variables.p_d[d][t] for d in self.DEMANDS) == 0  for t in self.TIMES), name = "balance")
 
-    def build_model(self):
+    def _build_model(self):
         self.model = gb.Model(name='Investment Planning')
 
         self.model.Params.TIME_LIMIT = self.timelimit # set time limit for optimization to 100 seconds
@@ -200,9 +199,7 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=30*24, budget=450, timelimit=100)
-    # Build model
-    ip.build_model()
+    ip = NodalInvestmentPlanning(hours=30*24, budget=450, timelimit=100)
     # Run optimization
     ip.run()
     # Display results
