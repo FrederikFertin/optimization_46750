@@ -168,7 +168,7 @@ class InvestmentPlanning(Network):
         """ Initialize constraints """
         # Budget constraints
         self.constraints.budget = self.model.addConstr(gb.quicksum(
-                                    self.variables.P_investment[g] * self.CAPEX[g] for g in self.INVESTMENTS)
+                                    self.variables.P_investment[i][n] * self.CAPEX[i] for i in self.INVESTMENTS for n in self.NODES)
                                     <= self.BUDGET, name='budget')
         
         self._add_lower_level_constraints()
