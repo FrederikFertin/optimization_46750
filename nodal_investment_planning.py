@@ -1,3 +1,4 @@
+#%%
 import gurobipy as gb
 from network import Network
 from gurobipy import GRB
@@ -31,7 +32,7 @@ class InvestmentPlanning(Network):
             assert hours % 24 == 0, "Hours must be a multiple of 24"
             days = hours // 24
             chosen_days = np.random.choice(range(365), days, replace=False)
-            self.cf = {g: 1 for g in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
+            self.cf = {i: 1 for i in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
 
             self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
@@ -70,7 +71,7 @@ class InvestmentPlanning(Network):
         self.variables.sigma_under = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.sigma_over  = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
-        # Add binary auxiliary variables for non-convex constraints
+        # Add binary auxiliary variables for bi-linear constraints
         self.variables.b1 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.b2 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b2_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.b3 = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b3_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
@@ -127,15 +128,20 @@ class InvestmentPlanning(Network):
         
         
         # Generation capacity limits
-        self.constraints.gen_cap_generators   = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_cap_generators")
-        self.constraints.gen_cap_windturbines = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_W[t][g] for g in self.WINDTURBINES for t in self.TIMES), name = "gen_cap_windturbines")
-        self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_cap_investments")
+        self.constraints.gen_cap_generators   = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES for n in self.NODES), name = "gen_cap_generators")
+        self.constraints.gen_cap_windturbines = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_W[t][g] for g in self.WINDTURBINES for t in self.TIMES for n in self.NODES), name = "gen_cap_windturbines")
+        self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.variables.P_investment[g][n] * self.fluxes[g][t_ix] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES) for n in self.NODES), name = "gen_cap_investments")
         
         # Demand magnitude constraints
         self.constraints.dem_mag = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES), name = "dem_mag")
         
         # KKT for balancing constraint
-        self.constraints.balance = self.model.addConstrs((gb.quicksum(self.variables.p_g[g][t] for g in self.PRODUCTION_UNITS) - gb.quicksum(self.variables.p_d[d][t] for d in self.DEMANDS) == 0  for t in self.TIMES), name = "balance")
+        self.constraints.balance = self.model.addConstrs((gb.quicksum(self.variables.p_g[g][n][t] for g in self.PRODUCTION_UNITS) - gb.quicksum(self.variables.p_d[d][t] for d in self.map_d[n])
+                                                           + gb.quicksum(self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for m, l in self.map_n[n] for n in self.NODES) == 0  for t in self.TIMES for n in self.NODES), name = "balance")
+
+        # KKT for line capacity constraints
+        self.constraints.line_cap = self.model.addConstrs((- self.L_cap[l] <= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_lower")
+        self.constraints.line_cap = self.model.addConstrs((self.L_cap[l] >= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_upper")
 
     def build_model(self):
         self.model = gb.Model(name='Investment Planning')
@@ -211,10 +217,12 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=2*24, budget=450, timelimit=200)
+    ip = InvestmentPlanning(hours=1, budget=450, timelimit=200)
     # Build model
     ip.build_model()
     # Run optimization
     ip.run()
     # Display results
     ip.display_results()
+
+    #%%
