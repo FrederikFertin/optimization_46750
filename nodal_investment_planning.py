@@ -1,6 +1,5 @@
 import gurobipy as gb
 from network import Network
-from investment_planning import InvestmentPlanning
 from gurobipy import GRB
 import numpy as np
 import random
@@ -11,10 +10,14 @@ class expando(object):
     '''
     pass
 
-class NodalInvestmentPlanning(InvestmentPlanning):
+class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 1, budget:float = 100, timelimit:float=100): # initialize class
-        super().__init__(hours=hours, budget=budget, timelimit=timelimit)
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100): # initialize class
+        super().__init__()
+        self.data = expando() # build data attributes
+        self.variables = expando() # build variable attributes
+        self.constraints = expando() # build constraint attributes
+        self.results = expando() # build results attributes
         
         self.T = hours
         self.offshore_flux = np.ones(hours)
@@ -33,9 +36,15 @@ class NodalInvestmentPlanning(InvestmentPlanning):
             self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
             self.onshore_flux = np.concatenate([self.onshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
-            self.TIMES = ['T{0}'.format(t) for t in range(1, 24+1)] * days
+            self.demand_profiles = np.concatenate([self.demand_hourly.iloc[d*24: (d+1)*24]['Demand'].values for d in chosen_days])
+            self.TIMES = ['T{0}'.format(t) for t in range(1, days*24+1)]
+            self.P_D = {} # Distribution of system demands
+            for t, key in enumerate(self.TIMES):
+                self.P_D[key] = dict(zip(self.DEMANDS, self.load_info['load_percent']/100 * self.demand_profiles[t]))
+            #self.HOURS = ['T{0}'.format(t) for t in range(1, 24+1)]*days
         else:
             self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
+            #self.HOURS = self.TIMES
 
         # Establish fluxes (primarily capping generation capacities of renewables)
         self.fluxes = {'Onshore Wind': self.onshore_flux,
@@ -48,25 +57,28 @@ class NodalInvestmentPlanning(InvestmentPlanning):
 
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
 
-        self._build_model()
-
     def _add_lower_level_variables(self):
         # Define variables of lower level KKTs
-        self.variables.p_g = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.p_d = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.lmd = {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} # Hourly spot price (€/MWh)
+        self.variables.p_g   = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.p_d   = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.lmd   = {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} # Hourly spot price (€/MWh)
+        self.variables.theta = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='theta_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
+
         
-        self.variables.mu_under    = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.mu_over     = {g: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at time {1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_under    = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_over     = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.sigma_over  = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
         # Add binary auxiliary variables for non-convex constraints
-        self.variables.q = {g: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='q_{0}_{1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.z = {g: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='z_{0}_{1}'.format(g, t)) for t in self.TIMES} for g in self.PRODUCTION_UNITS}
-        self.variables.y = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='y_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.x = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='x_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-    
+        self.variables.b1 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.b2 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b2_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
+        self.variables.b3 = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b3_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.b4 = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b4_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.b5 = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b5_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
+        self.variables.b6 = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b6_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
+
+
     def _add_lower_level_constraints(self):
         M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
         
@@ -76,7 +88,7 @@ class NodalInvestmentPlanning(InvestmentPlanning):
         self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
         
         # KKT for lagrange objective derived wrt. demand variables
-        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[t][d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
+        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
         
         # KKT for generation minimal production. Bi-linear are replaced by linearized constraints
         # self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
@@ -97,8 +109,8 @@ class NodalInvestmentPlanning(InvestmentPlanning):
         self.constraints.gen_upper_windturbines_3 = self.model.addConstrs((self.variables.mu_over[g][t] <= M * (1 - self.variables.q[g][t]) for g in self.WINDTURBINES for t in self.TIMES), name = "gen_upper_windturbines_3")
 
         # self.constraints.gen_upper_investments = self.model.addConstrs(((self.variables.p_g[g][t] - self.variables.P_investment[g] * self.fluxes[g][t_ix]) * self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments")
-        self.constraints.gen_upper_investments_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] + M * self.variables.q[g][t] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_1")
-        self.constraints.gen_upper_investments_2 = self.model.addConstrs((self.variables.P_investment[g] - M * self.variables.q[g][t] <= self.variables.p_g[g][t] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_2")
+        self.constraints.gen_upper_investments_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] + M * self.variables.q[g][t] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_1")
+        self.constraints.gen_upper_investments_2 = self.model.addConstrs((self.variables.P_investment[g] * self.fluxes[g][t_ix] - M * self.variables.q[g][t] <= self.variables.p_g[g][t] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_2")
         self.constraints.gen_upper_investments_3 = self.model.addConstrs((self.variables.mu_over[g][t] <= M * (1 - self.variables.q[g][t]) for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_3")
 
         # KKT for demand constraints. Bi-linear are replaced by linearized constraints
@@ -125,7 +137,7 @@ class NodalInvestmentPlanning(InvestmentPlanning):
         # KKT for balancing constraint
         self.constraints.balance = self.model.addConstrs((gb.quicksum(self.variables.p_g[g][t] for g in self.PRODUCTION_UNITS) - gb.quicksum(self.variables.p_d[d][t] for d in self.DEMANDS) == 0  for t in self.TIMES), name = "balance")
 
-    def _build_model(self):
+    def build_model(self):
         self.model = gb.Model(name='Investment Planning')
 
         self.model.Params.TIME_LIMIT = self.timelimit # set time limit for optimization to 100 seconds
@@ -199,7 +211,9 @@ class NodalInvestmentPlanning(InvestmentPlanning):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = NodalInvestmentPlanning(hours=30*24, budget=450, timelimit=100)
+    ip = InvestmentPlanning(hours=2*24, budget=450, timelimit=200)
+    # Build model
+    ip.build_model()
     # Run optimization
     ip.run()
     # Display results
