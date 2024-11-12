@@ -61,7 +61,7 @@ class InvestmentPlanning(Network):
         # Define variables of lower level KKTs
         self.variables.p_g   = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.p_d   = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.lmd   = {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} # Hourly spot price (€/MWh)
+        self.variables.lmd   = {n: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.theta = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='theta_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
 
         
@@ -83,7 +83,7 @@ class InvestmentPlanning(Network):
         M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
         
         # KKT for lagrange objective derived wrt. generation variables
-        self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
+        self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[n][t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0 for g in self.GENERATORS for n in self.NODES for t in self.TIMES), name = "derived_lagrange_generators")
         self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
         self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
         
