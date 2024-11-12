@@ -71,7 +71,7 @@ class InvestmentPlanning(Network):
         self.variables.sigma_under = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.sigma_over  = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
 
-        # Add binary auxiliary variables for non-convex constraints
+        # Add binary auxiliary variables for bi-linear constraints
         self.variables.b1 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.b2 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b2_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.b3 = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b3_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
