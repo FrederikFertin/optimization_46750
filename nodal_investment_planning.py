@@ -62,7 +62,7 @@ class InvestmentPlanning(Network):
         # Define variables of lower level KKTs
         self.variables.p_g   = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.p_d   = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
-        self.variables.lmd   = {n: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0}'.format(t)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
+        self.variables.lmd   = {n: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.theta = {n: {m: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='theta_{0}_{1}_{2}'.format(n, m, t)) for t in self.TIMES} for m in self.LINES} for n in self.NODES}
 
         
@@ -70,6 +70,8 @@ class InvestmentPlanning(Network):
         self.variables.mu_over     = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
         self.variables.sigma_over  = {d: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
+        self.variables.rho_under   = {n: {m: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb between line {0} and line {1} at time {2}'.format(n, m, t)) for t in self.TIMES} for m in self.NODES} for n in self.NODES}
+        self.variables.rho_over    = {n: {m: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub between line {0} and line {1} at time {2}'.format(n, m, t)) for t in self.TIMES} for m in self.NODES} for n in self.NODES}
 
         # Add binary auxiliary variables for bi-linear constraints
         self.variables.b1 = {g: {n: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.NODES} for g in self.PRODUCTION_UNITS}
@@ -85,11 +87,11 @@ class InvestmentPlanning(Network):
         
         # KKT for lagrange objective derived wrt. generation variables
         self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[n][t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0 for g in self.GENERATORS for n in self.NODES for t in self.TIMES), name = "derived_lagrange_generators")
-        self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
-        self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
+        self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0 for g in self.WINDTURBINES for n in self.NODES for t in self.TIMES), name = "derived_lagrange_windturbines")
+        self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[i] - self.variables.lmd[n][t] - self.variables.mu_under[i][n][t] + self.variables.mu_over[i][n][t] == 0 for i in self.INVESTMENTS for n in self.NODES for t in self.TIMES), name = "derived_lagrange_investments")
         
         # KKT for lagrange objective derived wrt. demand variables
-        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
+        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[n][t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
         
         # KKT for generation minimal production. Bi-linear are replaced by linearized constraints
         # self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
@@ -126,11 +128,11 @@ class InvestmentPlanning(Network):
         self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.x[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
         self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.x[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
         
-        
+        ### Primal constraints ###
         # Generation capacity limits
         self.constraints.gen_cap_generators   = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES for n in self.NODES), name = "gen_cap_generators")
         self.constraints.gen_cap_windturbines = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_W[t][g] for g in self.WINDTURBINES for t in self.TIMES for n in self.NODES), name = "gen_cap_windturbines")
-        self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.variables.P_investment[g][n] * self.fluxes[g][t_ix] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES) for n in self.NODES), name = "gen_cap_investments")
+        self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.P_investment[i][n] * self.fluxes[g][t_ix] for i in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES) for n in self.NODES), name = "gen_cap_investments")
         
         # Demand magnitude constraints
         self.constraints.dem_mag = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES), name = "dem_mag")
@@ -142,6 +144,9 @@ class InvestmentPlanning(Network):
         # KKT for line capacity constraints
         self.constraints.line_cap = self.model.addConstrs((- self.L_cap[l] <= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_lower")
         self.constraints.line_cap = self.model.addConstrs((self.L_cap[l] >= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_upper")
+
+        # Reference voltage angle
+        self.constraints.ref_angle = self.model.addConstrs((self.variables.theta['N1'][t] == 0 for t in self.TIMES), name = "ref_angle")
 
     def build_model(self):
         self.model = gb.Model(name='Investment Planning')
