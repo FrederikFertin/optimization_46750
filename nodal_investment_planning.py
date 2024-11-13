@@ -100,7 +100,7 @@ class InvestmentPlanning(Network):
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.variables.b1[g][n][t] * self.P_G_max[g] for g in self.GENERATORS for n in self.NODES for t in self.TIMES), name = "gen_under_1")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.variables.b1[g][n][t] * self.P_W[g] for g in self.WINDTURBINES for n in self.NODES for t in self.TIMES), name = "gen_under_1")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.variables.b1[g][n][t] * self.variables.P_investment[g][n] for g in self.INVESTMENTS for n in self.NODES for t in self.TIMES), name = "gen_under_1")
-        self.constraints.gen_under_2 = self.model.addConstrs((self.variables.mu_under[g][n][t] <= M * (1 - self.variables.b1[g][n][t]) * M for g in self.PRODUCTION_UNITS for n in self.NODES for t in self.TIMES), name = "gen_under_2") 
+        self.constraints.gen_under_2 = self.model.addConstrs((self.variables.mu_under[g][n][t] <= M * (1 - self.variables.b1[g][n][t]) for g in self.PRODUCTION_UNITS for n in self.NODES for t in self.TIMES), name = "gen_under_2") 
 
         # KKT for generation capacities. Bi-linear are replaced by linearized constraints
         self.constraints.gen_upper_generators_1 = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_G_max[g] + M * self.variables.b2[g][n][t] for g in self.GENERATORS for n in self.NODES for t in self.TIMES), name = "gen_upper_generators_1")
@@ -117,16 +117,20 @@ class InvestmentPlanning(Network):
 
         # KKT for demand constraints. Bi-linear are replaced by linearized constraints
         # self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
-        self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.y[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
-        self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.y[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
+        self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.b3[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
+        self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.b3[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         
         
         # Redundant constraints
         # self.constraints.dem_upper = self.model.addConstrs(((self.variables.p_d[d][t] - self.P_D[t][d]) * self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_upper")
         # self.constraints.dem_upper_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] + M * self.variables.x[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_1")
-        self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.x[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
-        self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.x[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
+        self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.b4[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
+        self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.b4[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
         
+        # KKT for line flow constraints. Bi-linear are replaced by linearized constraints
+        self.constraints.line_under_2 = self.model.addConstrs((self.variables.rho_under[n][m][t] <= M * (1 - self.variables.b5[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "gen_upper_investments_3")
+
+
         ### Primal constraints ###
         # Generation capacity limits
         self.constraints.gen_cap_generators   = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES for n in self.NODES), name = "gen_cap_generators")
