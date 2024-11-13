@@ -2,7 +2,12 @@ import gurobipy as gb
 from network import Network
 from gurobipy import GRB
 import numpy as np
-import random
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set_style("whitegrid")
+sns.set_palette("colorblind")
 
 class expando(object):
     '''
@@ -12,8 +17,11 @@ class expando(object):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100): # initialize class
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42): # initialize class
         super().__init__()
+
+        np.random.seed(seed)
+
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
         self.constraints = expando() # build constraint attributes
@@ -25,18 +33,19 @@ class InvestmentPlanning(Network):
         self.gas_flux = np.ones(hours)
         self.nuclear_flux = np.ones(hours)
         self.onshore_flux = np.ones(hours)
-        #self.AF["Nuclear"] = 0.02
+        self.carbontax = carbontax
+        self.chosen_days = None
 
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
             days = hours // 24
-            chosen_days = np.random.choice(range(365), days, replace=False)
+            self.chosen_days = np.random.choice(range(365), days, replace=False)
             self.cf = {g: 1 for g in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
 
-            self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
-            self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
-            self.onshore_flux = np.concatenate([self.onshore_hourly_2019[d*24: (d+1)*24].values for d in chosen_days])
-            self.demand_profiles = np.concatenate([self.demand_hourly.iloc[d*24: (d+1)*24]['Demand'].values for d in chosen_days])
+            self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
+            self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
+            self.onshore_flux = np.concatenate([self.onshore_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
+            self.demand_profiles = np.concatenate([self.demand_hourly.iloc[d*24: (d+1)*24]['Demand'].values for d in self.chosen_days])
             self.TIMES = ['T{0}'.format(t) for t in range(1, days*24+1)]
             self.P_D = {} # Distribution of system demands
             for t, key in enumerate(self.TIMES):
@@ -52,10 +61,15 @@ class InvestmentPlanning(Network):
                        'Solar': self.solar_flux,
                        'Nuclear': self.nuclear_flux,
                        'Gas': self.gas_flux}
+        
+        # Define generation costs
+        self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
+        self.C_G_offer = {g: self.C_G_offer[g] + (self.EF[g]*self.carbontax) for g in self.GENERATORS} # Variable costs in €/MWh incl. carbon tax
+        self.C_I_offer = {g: self.v_OPEX[g] * 10**6 for g in self.INVESTMENTS} # Variable costs in €/MWh
+        self.C_offer = {**self.C_G_offer, **self.C_I_offer, **self.C_W_offer} # Indexed by PRODUCTION_UNITS
+
         self.BUDGET = budget # set budget for capital costs in M€
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-
-        self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
 
     def _add_lower_level_variables(self):
         # Define variables of lower level KKTs
@@ -78,9 +92,10 @@ class InvestmentPlanning(Network):
         M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
         
         # KKT for lagrange objective derived wrt. generation variables
-        self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
-        self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.v_OPEX['Offshore Wind'] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
-        self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
+        self.constraints.gen_lagrange   = self.model.addConstrs((self.C_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "derived_lagrange_generators")
+        #self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
+        #self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.C_W_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
+        #self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.C_I_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
         
         # KKT for lagrange objective derived wrt. demand variables
         self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
@@ -182,18 +197,86 @@ class InvestmentPlanning(Network):
         self.model.optimize()
         self._save_data()
     
+    def _calculate_capture_prices(self):
+        # Calculate capture price
+        self.data.capture_prices = {
+            g : (np.sum(self.data.lambda_[t] * self.data.investment_dispatch_values[t][g] for t in self.TIMES) /
+                    np.sum(self.data.investment_dispatch_values[t][g] for t in self.TIMES)) if self.data.investment_values[g] > 0 else None
+            for g in self.INVESTMENTS}
+
     def _save_data(self):
         # Save objective value
         self.data.objective_value = self.model.ObjVal
         
         # Save investment values
         self.data.investment_values = {g : self.variables.P_investment[g].x for g in self.INVESTMENTS}
+        self.data.capacities = {t :
+                                {**{g : self.data.investment_values[g]*self.fluxes[g][t_ix] for g in self.INVESTMENTS},
+                                **{g : self.P_G_max[g] for g in self.GENERATORS},
+                                **{g : self.P_W[t][g] for g in self.WINDTURBINES}}
+                                for t_ix, t in enumerate(self.TIMES)}
         
         # Save generation dispatch values
-        self.data.generation_dispatch_values = {(g,t) : self.variables.p_g[g][t].x for g in self.INVESTMENTS for t in self.TIMES}
+        self.data.investment_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.INVESTMENTS} for t in self.TIMES}
+        self.data.generator_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.GENERATORS} for t in self.TIMES}
+        self.data.windturbine_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.WINDTURBINES} for t in self.TIMES}
+        self.data.all_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.PRODUCTION_UNITS} for t in self.TIMES}
+
+        # Save demand dispatch values
+        self.data.demand_dispatch_values = {t : {d: self.variables.p_d[d][t].x for d in self.DEMANDS} for t in self.TIMES}
         
         # Save uniform prices lambda
         self.data.lambda_ = {t : self.variables.lmd[t].x for t in self.TIMES}
+
+        self._calculate_capture_prices()
+    
+    def _get_demand_curve_info(self, T: str):
+        bids = pd.Series(self.U_D).sort_values(ascending=False)
+        dispatch = pd.Series(self.data.demand_dispatch_values[T]).loc[bids.index]
+        demand = pd.Series(self.P_D[T]).loc[bids.index]
+        dispatch_cumulative = dispatch.copy()
+        demand_cumulative = demand.copy()
+        for i in range(1, len(dispatch_cumulative)):
+            dispatch_cumulative.iloc[i] += dispatch_cumulative.iloc[i-1]
+            demand_cumulative.iloc[i] += demand_cumulative.iloc[i-1]
+        
+        dispatch_cumulative = pd.concat([pd.Series([0]), dispatch_cumulative])
+        demand_cumulative = pd.concat([pd.Series([0]), demand_cumulative])
+        
+        bids = pd.concat([pd.Series([bids.iloc[0]]), bids])
+        
+        return dispatch_cumulative, bids, demand_cumulative
+    
+    def _get_supply_curve_info(self, T: str):
+        offers = pd.Series(self.C_offer).sort_values(ascending=True)
+        dispatch = pd.Series(self.data.all_dispatch_values[T]).loc[offers.index]
+        capacity = pd.Series(self.data.capacities[T]).loc[offers.index]
+        dispatch_cumulative = dispatch.copy()
+        capacity_cumulative = capacity.copy()
+        for i in range(1, len(dispatch_cumulative)):
+            dispatch_cumulative.iloc[i] += dispatch_cumulative.iloc[i-1]
+            capacity_cumulative.iloc[i] += capacity_cumulative.iloc[i-1]
+        dispatch_cumulative = pd.concat([pd.Series([0]), dispatch_cumulative])
+        capacity_cumulative = pd.concat([pd.Series([0]), capacity_cumulative])
+        offers = pd.concat([pd.Series(offers.iloc[0]), offers])
+        
+        return dispatch_cumulative, offers, capacity_cumulative
+        
+    def plot_supply_demand_curve(self, T: str):
+
+        dispatch_cumulative, offers, capacity_cumulative = self._get_supply_curve_info(T)
+        bought_cumulative, bids, demand_cumulative = self._get_demand_curve_info(T)
+        plt.step(np.array(capacity_cumulative), np.array(offers), label='Supply', )
+        plt.step(np.array(demand_cumulative), np.array(bids), label='Demand', )
+        #plt.step(np.array(dispatch_cumulative), np.array(offers), label='Supply dispatched')
+        #plt.step(np.array(bought_cumulative), np.array(bids), label='Demand met')
+        plt.xlabel('Quantity [MWh]')
+        plt.ylabel('Power Price [€/MWh]')
+        plt.title('Supply/Demand curve for time {0}'.format(T))
+        plt.xlim(0, max(capacity_cumulative.max(), demand_cumulative.max()))
+        plt.legend()
+        plt.grid()
+        plt.show()
 
     def display_results(self):
         print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
@@ -205,11 +288,17 @@ class InvestmentPlanning(Network):
 
 
 if __name__ == '__main__':
+    # Carbon TAX price: https://www.statista.com/statistics/1322214/carbon-prices-european-union-emission-trading-scheme/
+    # Carbon TAX price: https://www.eex.com/en/market-data/emission-allowances/eua-auction-results
+    
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=2*24, budget=450, timelimit=200)
+    ip = InvestmentPlanning(hours=2*24, budget=1000, timelimit=30, carbontax=60, seed=38)
+
     # Build model
     ip.build_model()
     # Run optimization
     ip.run()
     # Display results
     ip.display_results()
+
+    ip.plot_supply_demand_curve('T1')

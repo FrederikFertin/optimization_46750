@@ -55,6 +55,7 @@ class Network:
     if wind:
         WINDTURBINES = ['W{0}'.format(t) for t in range(1, W+1)]
     else:
+        W = 0
         WINDTURBINES = []
     INVESTMENTS = list(investment_data.columns[0:5])    
     
@@ -90,7 +91,7 @@ class Network:
     P_R_MINUS = dict(zip(GENERATORS, gen_tech['R_minus'])) # Down reserve capacity
     C_U = dict(zip(GENERATORS, gen_econ['C_u'])) # Up reserve cost
     C_D = dict(zip(GENERATORS, gen_econ['C_d'])) # Down reserve cost
-
+    EF = dict(zip(GENERATORS, gen_econ['EF [tCO2/MWh]'])) # Emission factor of generator [tCO2/MWh]
     
     ## Demand Information
     P_D_sum = dict(zip(TIMES, system_demand['System_demand'])) # Total hourly system demands [MWh]
@@ -103,6 +104,7 @@ class Network:
     U_D_curt = 400 # cost of demand curtailment in BM [$/MWh]
     
     ## Wind Turbine Information
+    C_W_offer = dict(zip(WINDTURBINES, W * [v_OPEX['Offshore Wind'] * 10**6])) # Wind farm day-ahead offer price
     p_W_cap = 200 * wind # Wind farm capacities (MW)
     WT = ['V{0}'.format(v) for v in wind_tech['Profile']]
     chosen_wind_profiles = wind_profiles[WT] # 'Randomly' chosen production profiles for each wind farm
