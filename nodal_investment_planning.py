@@ -130,6 +130,10 @@ class InvestmentPlanning(Network):
         self.constraints.line_under_2 = self.model.addConstrs((self.L_cap[l]/self.L_susceptance[l] - M * self.variables.b5[n][m][t] <= self.variables.theta[n][t] - self.variables.theta[m][t] for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_under_2")
         self.constraints.line_under_3 = self.model.addConstrs((self.variables.theta[n][t] - self.variables.theta[m][t]  <= self.L_cap[l]/self.L_susceptance[l] + M * self.variables.b5[n][m][t] for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_under_3")
 
+        self.constraints.line_upper_1 = self.model.addConstrs((self.variables.rho_upper[n][m][t] <= M * (1 - self.variables.b6[n][m][t]) * M for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_under_1")
+        self.constraints.line_upper_2 = self.model.addConstrs((-self.L_cap[l]/self.L_susceptance[l] - M * self.variables.b6[n][m][t] <= self.variables.theta[n][t] - self.variables.theta[m][t] for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_under_2")
+        self.constraints.line_upper_3 = self.model.addConstrs((self.variables.theta[n][t] - self.variables.theta[m][t]  <= -self.L_cap[l]/self.L_susceptance[l] + M * self.variables.b6[n][m][t] for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_under_3")
+
         ### Primal constraints ###
         # Generation capacity limits
         self.constraints.gen_cap_generators   = self.model.addConstrs((self.variables.p_g[g][n][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES for n in self.NODES), name = "gen_cap_generators")
