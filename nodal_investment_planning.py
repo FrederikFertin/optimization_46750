@@ -91,8 +91,11 @@ class InvestmentPlanning(Network):
         self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[i] - self.variables.lmd[n][t] - self.variables.mu_under[i][n][t] + self.variables.mu_over[i][n][t] == 0 for i in self.INVESTMENTS for n in self.NODES for t in self.TIMES), name = "derived_lagrange_investments")
         
         # KKT for lagrange objective derived wrt. demand variables
-        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[n][t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
+        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[n][t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.map_d[n] for n in self.NODES for t in self.TIMES), name = "derived_lagrange_demand")
         
+        # KKT for lagrange objective derived wrt. line flow variables
+        self.constraints.line_lagrange = self.model.addConstrs((self.L_susceptance[l] * (self.variables.lmd[n][t] - self.variables.rho_under[n][m][t] + self.variables.rho_over[n][m][t]) == 0 for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "derived_lagrange_line")
+
         # KKT for generation minimal production. Bi-linear are replaced by linearized constraints
         # self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_under_1")
