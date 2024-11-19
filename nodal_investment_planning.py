@@ -20,11 +20,8 @@ class expando(object):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42): # initialize class
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100): # initialize class
         super().__init__()
-
-        np.random.seed(seed)
-
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
         self.constraints = expando() # build constraint attributes
@@ -36,8 +33,7 @@ class InvestmentPlanning(Network):
         self.gas_flux = np.ones(hours)
         self.nuclear_flux = np.ones(hours)
         self.onshore_flux = np.ones(hours)
-        self.carbontax = carbontax
-        self.chosen_days = None
+        #self.AF["Nuclear"] = 0.02
 
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -128,12 +124,12 @@ class InvestmentPlanning(Network):
 
         # KKT for demand constraints. Bi-linear are replaced by linearized constraints
         # self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
-        self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.b3[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under_1")
-        self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.b3[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under_2")
+        self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.b3[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
+        self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.b3[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         
         # self.constraints.dem_upper_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] + M * self.variables.x[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_1")
-        self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.b4[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
-        self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.b4[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
+        self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.b4[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
+        self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.b4[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
         
         # KKT for line flow constraints. Bi-linear are replaced by linearized constraints
         self.constraints.line_under_1 = self.model.addConstrs((self.variables.rho_under[n][m][t] <= M * (1 - self.variables.b5[n][m][t]) for n in self.NODES for t in self.TIMES for m, l in self.map_n[n].items()), name = "line_under_1")
@@ -231,12 +227,13 @@ class InvestmentPlanning(Network):
     def display_results(self):
         print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
         print('Investment Capacities:')
-        for tech, node in self.data.investment_values.items():
-            for investment, value in node.items():
+        for tech, investment in self.data.investment_values.items():
+            capex = 0
+            for node, value in investment.items():
+                capex += value*self.CAPEX[tech]
                 if value > 0:
-                    print(f"{tech} at {investment}: \t{round(value,2)} MW")
-            print(f"Capital cost for{tech}: \t\t{round(value*self.CAPEX[tech],2)} M€\n")
-    
+                    print(f"{tech} at {node}: \t{round(value,2)} MW")
+            print(f"Capital cost for {tech}: \t\t{round(capex,2)} M€\n")
 
     def plotNetwork(self):
         # create empty net
