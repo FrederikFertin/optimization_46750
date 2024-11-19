@@ -120,15 +120,19 @@ class InvestmentPlanning(Network):
         self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.b3[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.b3[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         
-        
-        # Redundant constraints
         # self.constraints.dem_upper_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] + M * self.variables.x[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_1")
         self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.b4[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
         self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.b4[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
         
         # KKT for line flow constraints. Bi-linear are replaced by linearized constraints
-        self.constraints.line_under_2 = self.model.addConstrs((self.variables.rho_under[n][m][t] <= M * (1 - self.variables.b5[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "gen_upper_investments_3")
-
+        self.constraints.line_under_1 = self.model.addConstrs((self.variables.rho_under[n][m][t] <= M * (1 - self.variables.b5[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_1")
+        self.constraints.line_under_2 = self.model.addConstrs((self.L_cap[l]/self.L_susceptance[l] - (1-self.variables.b5[n][m][t]) * M <= self.variables.theta[n][t] - self.variables.theta[m][t] for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_2")
+        self.constraints.line_under_3 = self.model.addConstrs((self.variables.theta[n][t] - self.variables.theta[m][t] <= self.L_cap[l]/self.L_susceptance[l] + (1-self.variables.b5[n][m][t]) * M for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_3")
+        
+        self.constraints.line_over_1 = self.model.addConstrs((self.variables.rho_over[n][m][t] <= M * (1 - self.variables.b6[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_over_1")
+        self.constraints.line_over_2 = self.model.addConstrs((-self.L_cap[l]/self.L_susceptance[l] - (1-self.variables.b6[n][m][t]) * M <= self.variables.theta[n][t] - self.variables.theta[m][t] for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_over_2")
+        self.constraints.line_over_3 = self.model.addConstrs((self.variables.theta[n][t] - self.variables.theta[m][t] <= -self.L_cap[l]/self.L_susceptance[l] + (1-self.variables.b6[n][m][t]) * M for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_over_3")
+    
 
         ### Primal constraints ###
         # Generation capacity limits
