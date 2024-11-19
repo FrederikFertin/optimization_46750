@@ -13,8 +13,11 @@ class expando(object):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100): # initialize class
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42): # initialize class
         super().__init__()
+
+        np.random.seed(seed)
+
         self.data = expando() # build data attributes
         self.variables = expando() # build variable attributes
         self.constraints = expando() # build constraint attributes
@@ -26,7 +29,8 @@ class InvestmentPlanning(Network):
         self.gas_flux = np.ones(hours)
         self.nuclear_flux = np.ones(hours)
         self.onshore_flux = np.ones(hours)
-        #self.AF["Nuclear"] = 0.02
+        self.carbontax = carbontax
+        self.chosen_days = None
 
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
