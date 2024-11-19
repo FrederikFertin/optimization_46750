@@ -251,11 +251,11 @@ class InvestmentPlanning(Network):
         offers = pd.Series(self.C_offer).sort_values(ascending=True)
         dispatch = pd.Series(self.data.all_dispatch_values[T]).loc[offers.index]
         capacity = pd.Series(self.data.capacities[T]).loc[offers.index]
-        dispatch_cumulative = dispatch.copy()
-        capacity_cumulative = capacity.copy()
-        for i in range(1, len(dispatch_cumulative)):
-            dispatch_cumulative.iloc[i] += dispatch_cumulative.iloc[i-1]
-            capacity_cumulative.iloc[i] += capacity_cumulative.iloc[i-1]
+        dispatch_cumulative = dispatch.cumsum()
+        capacity_cumulative = capacity.cumsum()
+        # for i in range(1, len(dispatch_cumulative)):
+        #     dispatch_cumulative.iloc[i] += dispatch_cumulative.iloc[i-1]
+        #     capacity_cumulative.iloc[i] += capacity_cumulative.iloc[i-1]
         dispatch_cumulative = pd.concat([pd.Series([0]), dispatch_cumulative])
         capacity_cumulative = pd.concat([pd.Series([0]), capacity_cumulative])
         offers = pd.concat([pd.Series(offers.iloc[0]), offers])
