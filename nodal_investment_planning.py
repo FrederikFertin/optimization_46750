@@ -220,15 +220,17 @@ class InvestmentPlanning(Network):
     def display_results(self):
         print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
         print('Investment Capacities:')
-        for key, value in self.data.investment_values.items():
-            print(f"{key}: \t\t{round(value,2)} MW")
-            print(f"Capital cost: \t\t{round(value*self.CAPEX[key],2)} M€\n")
+        for tech, node in self.data.investment_values.items():
+            for investment, value in node.items():
+                if value > 0:
+                    print(f"{tech} at {investment}: \t{round(value,2)} MW")
+            print(f"Capital cost for{tech}: \t\t{round(value*self.CAPEX[tech],2)} M€\n")
 
 
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=2*24, budget=450, timelimit=200)
+    ip = InvestmentPlanning(hours=24, budget=450, timelimit=200)
     # Build model
     ip.build_model()
     # Run optimization
