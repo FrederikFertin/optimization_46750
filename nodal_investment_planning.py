@@ -4,6 +4,13 @@ from network import Network
 from gurobipy import GRB
 import numpy as np
 import random
+import pandas as pd
+import pandapower as pp
+import pandapower.plotting as plot
+import matplotlib.pyplot as plt
+import os
+from matplotlib.lines import Line2D
+
 
 class expando(object):
     '''
@@ -229,6 +236,90 @@ class InvestmentPlanning(Network):
                 if value > 0:
                     print(f"{tech} at {investment}: \t{round(value,2)} MW")
             print(f"Capital cost for{tech}: \t\t{round(value*self.CAPEX[tech],2)} M€\n")
+    
+
+    def plotNetwork(self):
+        # create empty net
+        net = pp.create_empty_network()
+        cwd = os.path.dirname(__file__)
+        bus_map = pd.read_csv(cwd + '/data/bus_map.csv', delimiter=';')
+        
+        line_map = pd.read_csv(cwd + '/data/lines.csv', delimiter=';')
+        
+        # Create buses
+        for i in range(len(bus_map)):
+            pp.create_bus(net, vn_kv=0.4, index = i,
+                        geodata=(bus_map['x-coord'][i], -bus_map['y-coord'][i]),
+                        name=bus_map['Bus'][i])
+            
+            for j in range(len(self.map_g[bus_map['Bus'][i]])):
+                pp.create_gen(net, bus=i, p_mw=100)
+            for j in range(len(self.map_d[bus_map['Bus'][i]])):
+                pp.create_load(net, bus=i, p_mw=100)
+            for j in range(len(self.map_w[bus_map['Bus'][i]])):
+                pp.create_sgen(net, bus=i, p_mw=100)#, vm_pu=1.05)
+            for g_type, nodal_investments in self.data.investment_values.items():
+                for node, investment_size in nodal_investments.items():
+                    if investment_size > 0 and node == bus_map['Bus'][i]:
+                        if g_type == "Gas":
+                            pp.create_gen(net, bus=i, p_mw=investment_size)
+                            #net.gen.at[gen_idx, 'color'] = 'red'
+                            net.bus.at[i, 'color'] = 'darkred'
+                        elif g_type=="Nuclear":
+                            pp.create_gen(net, bus=i, p_mw=investment_size)
+                            net.bus.at[i, 'color'] = 'darkviolet'
+                        elif g_type == "Solar":
+                            pp.create_sgen(net, bus=i, p_mw=investment_size)
+                            net.bus.at[i, 'color'] = 'darkorange'
+                        elif g_type == "Offshore Wind":
+                            pp.create_gen(net, bus=i, p_mw=investment_size)
+                            net.bus.at[i, 'color'] = 'darkblue'
+                        else:
+                            pp.create_gen(net, bus=i, p_mw=investment_size)
+                            net.bus.at[i, 'color'] = 'lightblue'
+            
+
+        # Create lines
+        for i in range(len(line_map)):
+            pp.create_line_from_parameters(net,
+                    from_bus=    int(line_map['FromBus'][i][1:])-1,
+                    to_bus=     int(line_map['ToBus'][i][1:])-1,
+                    length_km=2,
+                    name='L'+str(i+1),
+                    r_ohm_per_km=0.2,
+                    x_ohm_per_km=0.07,
+                    c_nf_per_km=0.3,
+                    max_i_ka=100)
+        
+        # plot the network
+        size = 5
+        d_c = plot.create_load_collection(net, loads=net.load.index, size=size)
+        
+        
+        #gen_colors = net.gen['color'].fillna('black').tolist()  # Default to black if no color set
+        gen_c = plot.create_gen_collection(net, gens=net.gen.index, size=size, orientation=0)
+        wind_c = plot.create_sgen_collection(net, sgens=net.sgen.index, size=size, orientation=3.14/2)
+        
+        bus_colors = net.bus['color'].fillna('black').tolist()  # Default to blue if no color set
+        bc = plot.create_bus_collection(net, buses=net.bus.index, size=size, 
+                                        zorder=10, color=bus_colors)
+        
+        lc = plot.create_line_collection(net, lines=net.line.index, zorder=1, use_bus_geodata=True, color='grey')
+        
+        # Make a legend for investments
+        legend_elements = [
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkred', markersize=10, label='Gas'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkviolet', markersize=10, label='Nuclear'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkorange', markersize=10, label='Solar'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkblue', markersize=10, label='Offshore Wind'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='lightblue', markersize=10, label='Onshore Wind'),
+            ]
+
+
+        plot.draw_collections([lc, d_c, gen_c, wind_c, bc])
+        plt.title("Network", fontsize=30)
+        plt.legend(handles=legend_elements, loc='upper right')
+        plt.show()
 
 
 
@@ -241,4 +332,5 @@ if __name__ == '__main__':
     ip.run()
     # Display results
     ip.display_results()
+    ip.plotNetwork()
 #%%
