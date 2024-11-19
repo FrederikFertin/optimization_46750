@@ -91,7 +91,7 @@ class InvestmentPlanning(Network):
         self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.v_OPEX[g] - self.variables.lmd[n][t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0 for g in self.INVESTMENTS for n in self.NODES for t in self.TIMES), name = "derived_lagrange_investments")
         
         # KKT for lagrange objective derived wrt. demand variables
-        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[n][t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.map_d[n] for n in self.NODES for t in self.TIMES), name = "derived_lagrange_demand")
+        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[n][t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for n in self.NODES for d in self.map_d[n] for t in self.TIMES), name = "derived_lagrange_demand")
         
         # KKT for lagrange objective derived wrt. line flow variables
         self.constraints.line_lagrange = self.model.addConstrs((self.L_susceptance[l] * (self.variables.lmd[n][t] - self.variables.rho_under[n][m][t] + self.variables.rho_over[n][m][t]) == 0 for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "derived_lagrange_line")
@@ -120,15 +120,19 @@ class InvestmentPlanning(Network):
         self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.b3[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under_1")
         self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.b3[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under_2")
         
-        
-        # Redundant constraints
         # self.constraints.dem_upper_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] + M * self.variables.x[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_1")
         self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.b4[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
         self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.b4[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
         
         # KKT for line flow constraints. Bi-linear are replaced by linearized constraints
-        self.constraints.line_under_2 = self.model.addConstrs((self.variables.rho_under[n][m][t] <= M * (1 - self.variables.b5[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_2")
-
+        self.constraints.line_under_1 = self.model.addConstrs((self.variables.rho_under[n][m][t] <= M * (1 - self.variables.b5[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_1")
+        self.constraints.line_under_2 = self.model.addConstrs((self.L_cap[l]/self.L_susceptance[l] - (1-self.variables.b5[n][m][t]) * M <= self.variables.theta[n][t] - self.variables.theta[m][t] for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_2")
+        self.constraints.line_under_3 = self.model.addConstrs((self.variables.theta[n][t] - self.variables.theta[m][t] <= self.L_cap[l]/self.L_susceptance[l] + (1-self.variables.b5[n][m][t]) * M for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_under_3")
+        
+        self.constraints.line_over_1 = self.model.addConstrs((self.variables.rho_over[n][m][t] <= M * (1 - self.variables.b6[n][m][t]) for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_over_1")
+        self.constraints.line_over_2 = self.model.addConstrs((-self.L_cap[l]/self.L_susceptance[l] - (1-self.variables.b6[n][m][t]) * M <= self.variables.theta[n][t] - self.variables.theta[m][t] for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_over_2")
+        self.constraints.line_over_3 = self.model.addConstrs((self.variables.theta[n][t] - self.variables.theta[m][t] <= -self.L_cap[l]/self.L_susceptance[l] + (1-self.variables.b6[n][m][t]) * M for t in self.TIMES for m, l in self.map_n[n] for n in self.NODES), name = "line_over_3")
+    
 
         ### Primal constraints ###
         # Generation capacity limits
@@ -139,13 +143,13 @@ class InvestmentPlanning(Network):
         # Demand magnitude constraints
         self.constraints.dem_mag = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES), name = "dem_mag")
         
-        # KKT for balancing constraint
+        # Balancing constraint
         self.constraints.balance = self.model.addConstrs((gb.quicksum(self.variables.p_g[g][n][t] for g in self.PRODUCTION_UNITS) - gb.quicksum(self.variables.p_d[d][t] for d in self.map_d[n])
                                                            + gb.quicksum(self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for m, l in self.map_n[n] for n in self.NODES) == 0  for t in self.TIMES for n in self.NODES), name = "balance")
 
-        # KKT for line capacity constraints
-        self.constraints.line_cap = self.model.addConstrs((- self.L_cap[l] <= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_lower")
-        self.constraints.line_cap = self.model.addConstrs((self.L_cap[l] >= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_upper")
+        # Line capacity constraints
+        self.constraints.line_cap_lower = self.model.addConstrs((- self.L_cap[l] <= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_lower")
+        self.constraints.line_cap_upper = self.model.addConstrs((self.L_cap[l] >= self.L_susceptance[l] * (self.variables.theta[n][t] - self.variables.theta[m][t]) for t in self.TIMES for m, l in self.map_n[n].items() for n in self.NODES), name = "line_cap_upper")
 
         # Reference voltage angle
         self.constraints.ref_angle = self.model.addConstrs((self.variables.theta['N1'][t] == 0 for t in self.TIMES), name = "ref_angle")
