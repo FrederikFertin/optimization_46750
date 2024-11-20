@@ -31,14 +31,21 @@ class InvestmentPlanning(Network):
         self.results = expando() # build results attributes
         
         self.T = hours
+        self.carbontax = carbontax
+        self.chosen_days = None
+
+        self._initialize_fluxes(hours)
+        self._initialize_times_and_demands(hours)
+        self._initialize_costs_and_budget(budget, timelimit)
+
+    def _initialize_fluxes(self, hours):
         self.offshore_flux = np.ones(hours)
         self.solar_flux = np.ones(hours)
         self.gas_flux = np.ones(hours)
         self.nuclear_flux = np.ones(hours)
         self.onshore_flux = np.ones(hours)
-        self.carbontax = carbontax
-        self.chosen_days = None
 
+    def _initialize_times_and_demands(self, hours):
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
             days = hours // 24
@@ -58,6 +65,7 @@ class InvestmentPlanning(Network):
             self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
             #self.HOURS = self.TIMES
 
+    def _initialize_costs_and_budget(self, budget, timelimit):
         # Establish fluxes (primarily capping generation capacities of renewables)
         self.fluxes = {'Onshore Wind': self.onshore_flux,
                        'Offshore Wind': self.offshore_flux,
@@ -76,13 +84,14 @@ class InvestmentPlanning(Network):
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
 
     def _add_lower_level_variables(self):
-        # Define variables of lower level KKTs
+        # Define primal variables of lower level KKTs
         self.variables.p_g   = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.p_d   = {d: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.lmd   = {n: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.theta = {n: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
+        self.variables.flow = {l: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
-        
+        # Define dual variables of lower level KKTs
+        self.variables.lmd   = {n: {t: self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.mu_under    = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.mu_over     = {g: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under = {d: {n: {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
@@ -103,8 +112,10 @@ class InvestmentPlanning(Network):
 
 
     def _add_lower_level_constraints(self):
-        M =  max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
-        
+        M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
+
+        self.constraints.flow = self.model.addConstrs((self.variables.flow[l][t] == self.L_susceptance[l] * (self.variables.theta[self.node_L_from[l]][t] - self.variables.theta[self.node_L_to[l]][t]) for l in self.LINES for t in self.TIMES), name = "flow")
+
         # KKT for lagrange objective derived wrt. generation variables
         self.constraints.gen_lagrange = self.model.addConstrs((self.C_offer[g] - self.variables.lmd[n][t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0 for g in self.PRODUCTION_UNITS for n in self.node_production[g] for t in self.TIMES), name = "derived_lagrange_generators")
         #self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[n][t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0 for g in self.GENERATORS for n in self.NODES for t in self.TIMES), name = "derived_lagrange_generators")

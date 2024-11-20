@@ -128,7 +128,7 @@ class Network:
         L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
     else:
         L_cap = dict(zip(LINES, line_info['Capacity']))
-    L_susceptance = dict(zip(LINES, [30 for _ in LINES])) #  Susceptance of transmission line [pu.] 
+    L_susceptance = dict(zip(LINES, [500 for _ in LINES])) #  Susceptance of transmission line [pu.] 
     L_from = dict(zip(LINES, line_info['From'])) # Origin node of transmission line
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
     
@@ -159,6 +159,8 @@ class Network:
         self.node_W = {key : ["N{0}".format(value)] for key,value in self.node_W.items()}
         self.node_G = {key : ["N{0}".format(value)] for key,value in self.node_G.items()}
         self.node_D = {key : ["N{0}".format(value)] for key,value in self.node_D.items()}
+        self.node_L_from = dict(zip(self.LINES, ['N{0}'.format(n) for n in self.line_info['From']]))
+        self.node_L_to = dict(zip(self.LINES, ['N{0}'.format(n) for n in self.line_info['To']]))
 
     def _map_units(self,node_list):
         mapping_units = {}
