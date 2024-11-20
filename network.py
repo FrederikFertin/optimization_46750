@@ -79,6 +79,15 @@ class Network:
     LCOE = {}
     for key in INVESTMENTS:
         LCOE[key] = ((CAPEX[key] * AF[key] + f_OPEX[key])/(cf[key]*8760) + v_OPEX[key]) * 10**6
+    node_I = dict(zip(INVESTMENTS, [NODES]*len(INVESTMENTS))) # Node placements of investments
+    map_i = {}
+    for number, node in enumerate(NODES):
+        n = number + 1
+        u_list = []
+        for k, v in node_I.items():
+            if node in v:
+                u_list.append(k)
+        map_i[node] = u_list
 
     ## Conventional Generator Information
     P_G_max = dict(zip(GENERATORS, gen_tech['P_max'])) # Max generation cap.
@@ -129,7 +138,7 @@ class Network:
         L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
     else:
         L_cap = dict(zip(LINES, line_info['Capacity']))
-    L_susceptance = dict(zip(LINES, [500 for i in LINES])) #  Susceptance of transmission line [pu.] 
+    L_susceptance = dict(zip(LINES, [30 for _ in LINES])) #  Susceptance of transmission line [pu.] 
     L_from = dict(zip(LINES, line_info['From'])) # Origin node of transmission line
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
     
@@ -157,6 +166,9 @@ class Network:
         self.map_from = self._map_units(self.L_from) # Transmission lines
         self.map_to = self._map_units(self.L_to) # Transmission lines
         self._map_nodes() # Combination of the two above mappings
+        self.node_W = {key : ["N{0}".format(value)] for key,value in self.node_W.items()}
+        self.node_G = {key : ["N{0}".format(value)] for key,value in self.node_G.items()}
+        self.node_D = {key : ["N{0}".format(value)] for key,value in self.node_D.items()}
 
     def _map_units(self,node_list):
         mapping_units = {}
