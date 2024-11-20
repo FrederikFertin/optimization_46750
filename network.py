@@ -122,16 +122,6 @@ class Network:
         P_W[key] = dict(zip(WINDTURBINES, chosen_wind_profiles.iloc[t,:] * p_W_cap))
     node_W = dict(zip(WINDTURBINES, wind_tech['Node'])) # Wind turbine node placements
     
-    ## Electrolyzer Information
-    hydrogen_daily_demand = 100*0.2*24 # 8160 kg of hydrogen
-    
-    ## Battery Information
-    BATTERIES = ['B1']
-    batt_cap = {'B1': 400} # Battery capacity is 400 MWh
-    batt_init_soc = {'B1': 200} # Initial state of charge of battery - at time t-1 (T0)
-    batt_power = {'B1': 200} # Battery (dis)charging limit is 200 MW
-    batt_node = {'B1': 11} # Battery is placed at node 11
-    batt_eta = {'B1': 0.99} # Battery charging and discharging efficiency of 99%
 
     ## Transmission Line Information
     if wind:
@@ -143,18 +133,18 @@ class Network:
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
     
     ## Inter-Zonal capacities
-    c_z1_z2 = L_cap['L25'] + L_cap['L27']
-    c_z2_z3 = L_cap['L7'] + L_cap['L14'] + L_cap['L15'] + L_cap['L16'] + L_cap['L17']
+    # c_z1_z2 = L_cap['L25'] + L_cap['L27']
+    # c_z2_z3 = L_cap['L7'] + L_cap['L14'] + L_cap['L15'] + L_cap['L16'] + L_cap['L17']
 
-    zone_cap = {'Z1': {'Z2': c_z1_z2},
-                'Z2': {'Z1': c_z1_z2, 'Z3': c_z2_z3},
-                'Z3': {'Z2': c_z2_z3}}
-    zonal = {'Z1': ['Z12'],
-             'Z2': ['Z12', 'Z23'],
-             'Z3': ['Z23']}
-    INTERCONNECTORS = ['Z12', 'Z23']
-    ic_cap = {'Z12': c_z1_z2,
-              'Z23': c_z2_z3}
+    # zone_cap = {'Z1': {'Z2': c_z1_z2},
+    #             'Z2': {'Z1': c_z1_z2, 'Z3': c_z2_z3},
+    #             'Z3': {'Z2': c_z2_z3}}
+    # zonal = {'Z1': ['Z12'],
+    #          'Z2': ['Z12', 'Z23'],
+    #          'Z3': ['Z23']}
+    # INTERCONNECTORS = ['Z12', 'Z23']
+    # ic_cap = {'Z12': c_z1_z2,
+    #           'Z23': c_z2_z3}
 
 
     def __init__(self):
@@ -162,7 +152,7 @@ class Network:
         self.map_g = self._map_units(self.node_G) # Generators
         self.map_d = self._map_units(self.node_D) # Demands
         self.map_w = self._map_units(self.node_W) # Wind turbines
-        self.map_b = self._map_units(self.batt_node) # Batteries
+        # self.map_b = self._map_units(self.batt_node) # Batteries
         self.map_from = self._map_units(self.L_from) # Transmission lines
         self.map_to = self._map_units(self.L_to) # Transmission lines
         self._map_nodes() # Combination of the two above mappings
