@@ -147,7 +147,7 @@ class InvestmentPlanning(Network):
                                                             for n in self.NODES for t in self.TIMES), name = "angle_lower_limit")
 
     def _add_dual_lower_level_constraints(self):
-        M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
+        M = 2*max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
 
         """ KKT for lagrange objective derived wrt. generation variables """
         self.constraints.gen_lag    = self.model.addConstrs((self.C_offer[g] - self.variables.lmd[n][t] - self.variables.mu_under[g][n][t] + self.variables.mu_over[g][n][t] == 0
@@ -158,8 +158,8 @@ class InvestmentPlanning(Network):
                                                             for d in self.DEMANDS for n in self.node_D[d] for t in self.TIMES), name = "derived_lagrange_demand")
         
         """ KKT for lagrange objective derived wrt. line flow variables """
-        #self.constraints.line_f_lag = self.model.addConstrs(((self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t] + self.variables.rho_under[l][t] - self.variables.rho_over[l][t] == 0)
-        #                                                    for l in self.LINES for t in self.TIMES), name = "derived_lagrange_line_from")
+        self.constraints.line_f_lag = self.model.addConstrs(((self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t] + self.variables.rho_under[l][t] - self.variables.rho_over[l][t] == 0)
+                                                            for l in self.LINES for t in self.TIMES), name = "derived_lagrange_line_from")
         
         """ KKT for lagrange objective derived wrt. root node voltage angle variable """
         self.constraints.angle_lags = self.model.addConstrs(( gb.quicksum(
@@ -448,7 +448,7 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=1, budget=450, timelimit=200, carbontax=50, seed=38)
+    ip = InvestmentPlanning(hours=5, budget=450, timelimit=200, carbontax=50, seed=38)
     # Build model
     ip.build_model()
     # Run optimization
