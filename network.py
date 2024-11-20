@@ -143,7 +143,7 @@ class Network:
         self.map_g = self._map_units(self.node_G) # Generators
         self.map_d = self._map_units(self.node_D) # Demands
         self.map_w = self._map_units(self.node_W) # Wind turbines
-        self.map_b = self._map_units(self.batt_node) # Batteries
+        # self.map_b = self._map_units(self.batt_node) # Batteries
         self.map_from = self._map_units(self.L_from) # Transmission lines
         self.map_to = self._map_units(self.L_to) # Transmission lines
         self._map_nodes() # Combination of the two above mappings
