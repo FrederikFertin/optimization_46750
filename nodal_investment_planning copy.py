@@ -43,10 +43,10 @@ class InvestmentPlanning(Network):
 
     def _initialize_fluxes(self, hours):
         self.offshore_flux = np.ones(hours)
-        self.solar_flux = np.ones(hours)
-        self.gas_flux = np.ones(hours)
-        self.nuclear_flux = np.ones(hours)
-        self.onshore_flux = np.ones(hours)
+        self.solar_flux    = np.ones(hours)
+        self.gas_flux      = np.ones(hours)
+        self.nuclear_flux  = np.ones(hours)
+        self.onshore_flux  = np.ones(hours)
 
     def _initialize_times_and_demands(self, hours):
         if hours >= 24:
@@ -70,11 +70,11 @@ class InvestmentPlanning(Network):
 
     def _initialize_costs_and_budget(self, budget, timelimit):
         # Establish fluxes (primarily capping generation capacities of renewables)
-        self.fluxes = {'Onshore Wind': self.onshore_flux,
-                       'Offshore Wind': self.offshore_flux,
-                       'Solar': self.solar_flux,
-                       'Nuclear': self.nuclear_flux,
-                       'Gas': self.gas_flux}
+        self.fluxes = {'Onshore Wind'  : self.onshore_flux,
+                       'Offshore Wind' : self.offshore_flux,
+                       'Solar'         : self.solar_flux,
+                       'Nuclear'       : self.nuclear_flux,
+                       'Gas'           : self.gas_flux}
         
         # Define generation costs
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
@@ -95,7 +95,7 @@ class InvestmentPlanning(Network):
 
         # Define dual variables of lower level KKTs
         self.variables.nu           = {t:           self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
-        self.variables.lmd          = {n: {t:       self.model.addVar(lb=0, ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
+        self.variables.lmd          = {n: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.mu_over      = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under  = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
@@ -142,7 +142,7 @@ class InvestmentPlanning(Network):
         self.constraints.ref_angle  = self.model.addConstrs((  self.variables.theta[self.root_node][t] == 0
                                                             for t in self.TIMES), name = "ref_angle")
         self.constraints.angle_u    = self.model.addConstrs((  self.variables.theta[n][t] <= np.pi
-                                                            for n in self.NODES for t in self.TIMES), name = "angle_upper_limit")
+                                                            for n in self.NODES for t in self.TIMES), name = "angle_upper_limit") # Can these limits be imposed in the definition of the variable?
         self.constraints.angle_l    = self.model.addConstrs((- self.variables.theta[n][t] <= np.pi
                                                             for n in self.NODES for t in self.TIMES), name = "angle_lower_limit")
 
@@ -314,19 +314,20 @@ class InvestmentPlanning(Network):
     def display_results(self):
         print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
         print('Investment Capacities:')
-        for tech, investment in self.data.investment_values.items():
+        for g_type, nodal_investments in self.data.investment_values.items():
             capex = 0
-            for node, value in investment.items():
-                capex += value*self.CAPEX[tech]
-                if value > 0:
-                    print(f"{tech} at {node}: \t{round(value,2)} MW")
-            print(f"Capital cost for {tech}: \t\t{round(capex,2)} M€\n")
+            for node, investment_size in nodal_investments.items():
+                capex += investment_size*self.CAPEX[g_type]
+                if investment_size > 0:
+                    print(f"{g_type} at {node}: \t{round(investment_size,2)} MW")
+            if capex > 0: 
+                print(f"Capital cost for {g_type}: \t\t{round(capex,2)} M€\n")
 
     def plotNetwork(self):
         # create empty net
         net = pp.create_empty_network()
         cwd = os.path.dirname(__file__)
-        bus_map = pd.read_csv(cwd + '/data/bus_map.csv', delimiter=';')
+        bus_map = pd.read_csv(cwd + '/data/bus_map.csv', delimiter=';') # Move to Network class?
         
         line_map = pd.read_csv(cwd + '/data/lines.csv', delimiter=';')
         
@@ -336,11 +337,11 @@ class InvestmentPlanning(Network):
                         geodata=(bus_map['x-coord'][i], -bus_map['y-coord'][i]),
                         name=bus_map['Bus'][i])
             
-            for j in range(len(self.map_g[bus_map['Bus'][i]])):
+            for _ in range(len(self.map_g[bus_map['Bus'][i]])):
                 pp.create_gen(net, bus=i, p_mw=100)
-            for j in range(len(self.map_d[bus_map['Bus'][i]])):
+            for _ in range(len(self.map_d[bus_map['Bus'][i]])):
                 pp.create_load(net, bus=i, p_mw=100)
-            for j in range(len(self.map_w[bus_map['Bus'][i]])):
+            for _ in range(len(self.map_w[bus_map['Bus'][i]])):
                 pp.create_sgen(net, bus=i, p_mw=100)#, vm_pu=1.05)
             for g_type, nodal_investments in self.data.investment_values.items():
                 for node, investment_size in nodal_investments.items():
@@ -420,18 +421,18 @@ class InvestmentPlanning(Network):
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
         # Plot the first 12 graphs in the upper plot
-        for i, node in enumerate(nodes[:12]):
-            lambda_values = [self.data.lambda_[t][node] for t in times]
+        for i, node in enumerate(self.NODES[:12]):
+            lambda_values = [self.data.lambda_[node][t] for t in self.TIMES]
             color = colors[i % len(colors)]
             linestyle = linestyles[i//6 % len(linestyles)]
-            ax1.plot(times, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
+            ax1.plot(self.TIMES, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
 
         # Plot the remaining graphs in the lower plot
-        for i, node in enumerate(nodes[12:]):
-            lambda_values = [self.data.lambda_[t][node] for t in times]
+        for i, node in enumerate(self.NODES[12:]):
+            lambda_values = [self.data.lambda_[node][t] for t in self.TIMES]
             color = colors[i % len(colors)]
             linestyle = linestyles[i//6 % len(linestyles)]
-            ax2.plot(times, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
+            ax2.plot(self.TIMES, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
 
         # Add labels and legend
         ax1.set_ylabel('Price [$/MWh]', fontsize=16)
@@ -448,7 +449,7 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=5, budget=450, timelimit=200, carbontax=50, seed=38)
+    ip = InvestmentPlanning(hours=12, budget=450, timelimit=200, carbontax=50, seed=38)
     # Build model
     ip.build_model()
     # Run optimization
@@ -457,4 +458,6 @@ if __name__ == '__main__':
 
     ip.display_results()
     ip.plotNetwork()
+    
 #%%
+ip.plot_prices()
