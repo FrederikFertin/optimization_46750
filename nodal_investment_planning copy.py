@@ -406,19 +406,13 @@ class InvestmentPlanning(Network):
         plt.legend(handles=legend_elements, loc='upper right')
         plt.show()
 
-    def plot_prices(self):
-        # Extract the time steps
-        times = list(self.data.lambda_.keys())
-        
-        # Extract nodes
-        nodes = list(self.data.lambda_[times[0]].keys())
-        
+    def plot_prices(self):     
         # Define a list of colors and line styles
         colors = ['blue', 'green', 'red', 'orange', 'purple', 'cyan']
         linestyles = ['-', '--']
 
         # Plot the nodal time series as stairs plots with unique colors and line styles
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        _, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
         # Plot the first 12 graphs in the upper plot
         for i, node in enumerate(self.NODES[:12]):
