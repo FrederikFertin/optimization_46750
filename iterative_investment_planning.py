@@ -42,8 +42,7 @@ class nodal_clearing(Network):
             self.P_investment = {i: {n: 0 for n in self.node_I[i]} for i in self.INVESTMENTS}
 
         self._initialize_fluxes(hours)
-        self._initialize_times_and_demands(hours)
-        self._initialize_costs(timelimit)
+        self._initialize_times_and_demands(hours, timelimit)
 
     def _initialize_fluxes(self, hours):
         self.offshore_flux = np.ones(hours)
@@ -52,7 +51,14 @@ class nodal_clearing(Network):
         self.nuclear_flux  = np.ones(hours)
         self.onshore_flux  = np.ones(hours)
 
-    def _initialize_times_and_demands(self, hours):
+        # Establish fluxes (primarily capping generation capacities of renewables)
+        self.fluxes = {'Onshore Wind'  : self.onshore_flux,
+                       'Offshore Wind' : self.offshore_flux,
+                       'Solar'         : self.solar_flux,
+                       'Nuclear'       : self.nuclear_flux,
+                       'Gas'           : self.gas_flux}
+
+    def _initialize_times_and_demands(self, hours, timelimit):
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
             days = hours // 24
@@ -67,18 +73,8 @@ class nodal_clearing(Network):
             self.P_D = {} # Distribution of system demands
             for t, key in enumerate(self.TIMES):
                 self.P_D[key] = dict(zip(self.DEMANDS, self.load_info['load_percent']/100 * self.demand_profiles[t]))
-            #self.HOURS = ['T{0}'.format(t) for t in range(1, 24+1)]*days
         else:
-            self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
-            #self.HOURS = self.TIMES
-
-    def _initialize_costs(self, timelimit):
-        # Establish fluxes (primarily capping generation capacities of renewables)
-        self.fluxes = {'Onshore Wind'  : self.onshore_flux,
-                       'Offshore Wind' : self.offshore_flux,
-                       'Solar'         : self.solar_flux,
-                       'Nuclear'       : self.nuclear_flux,
-                       'Gas'           : self.gas_flux}
+            self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]        
         
         # Define generation costs
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
@@ -99,17 +95,17 @@ class nodal_clearing(Network):
         """ Initialize variables """
         self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.theta        = {n: {t:       self.model.addVar(lb=-np.pi,        ub=np.pi, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
+        self.variables.theta        = {n: {t:       self.model.addVar(lb=-np.pi,        ub=np.pi,        name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
         self.variables.flow         = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         """ Initialize objective function """
         self.model.setObjective(gb.quicksum(self.U_D[d] * self.variables.p_d[d][n][t] for d in self.DEMANDS for n in self.node_D[d] for t in self.TIMES)
                                -gb.quicksum(self.C_offer[g] * self.variables.p_g[g][n][t] for g in self.PRODUCTION_UNITS for n in self.node_production[g] for t in self.TIMES)
                                 , gb.GRB.MAXIMIZE)
-
         self.model.update()
 
         """ Initialize constraints """
+        # Define flow auxiliary variables
         self.constraints.flow       = self.model.addConstrs((self.variables.flow[l][t] == self.L_susceptance[l] * (self.variables.theta[self.node_L_from[l]][t] - self.variables.theta[self.node_L_to[l]][t])
                                                             for l in self.LINES for t in self.TIMES), name = "flow")
         # Generation capacity limits:
@@ -176,89 +172,6 @@ class nodal_clearing(Network):
                     print(f"{g_type} at {node}: \t{round(investment_size,2)} MW")
             if capex > 0: 
                 print(f"Capital cost for {g_type}: \t\t{round(capex,2)} M€\n")
-
-    def plotNetwork(self):
-        # create empty net
-        net = pp.create_empty_network()
-        cwd = os.path.dirname(__file__)
-        bus_map = pd.read_csv(cwd + '/data/bus_map.csv', delimiter=';') # Move to Network class?
-        
-        line_map = pd.read_csv(cwd + '/data/lines.csv', delimiter=';')
-        
-        # Create buses
-        for i in range(len(bus_map)):
-            pp.create_bus(net, vn_kv=0.4, index = i,
-                        geodata=(bus_map['x-coord'][i], -bus_map['y-coord'][i]),
-                        name=bus_map['Bus'][i])
-            
-            for _ in range(len(self.map_g[bus_map['Bus'][i]])):
-                pp.create_gen(net, bus=i, p_mw=100)
-            for _ in range(len(self.map_d[bus_map['Bus'][i]])):
-                pp.create_load(net, bus=i, p_mw=100)
-            for _ in range(len(self.map_w[bus_map['Bus'][i]])):
-                pp.create_sgen(net, bus=i, p_mw=100)#, vm_pu=1.05)
-            for g_type, nodal_investments in self.data.investment_values.items():
-                for node, investment_size in nodal_investments.items():
-                    if investment_size > 0 and node == bus_map['Bus'][i]:
-                        if g_type == "Gas":
-                            pp.create_gen(net, bus=i, p_mw=investment_size)
-                            #net.gen.at[gen_idx, 'color'] = 'red'
-                            net.bus.at[i, 'color'] = 'darkred'
-                        elif g_type=="Nuclear":
-                            pp.create_gen(net, bus=i, p_mw=investment_size)
-                            net.bus.at[i, 'color'] = 'darkviolet'
-                        elif g_type == "Solar":
-                            pp.create_sgen(net, bus=i, p_mw=investment_size)
-                            net.bus.at[i, 'color'] = 'darkorange'
-                        elif g_type == "Offshore Wind":
-                            pp.create_gen(net, bus=i, p_mw=investment_size)
-                            net.bus.at[i, 'color'] = 'darkblue'
-                        else:
-                            pp.create_gen(net, bus=i, p_mw=investment_size)
-                            net.bus.at[i, 'color'] = 'lightblue'
-            
-
-        # Create lines
-        for i in range(len(line_map)):
-            pp.create_line_from_parameters(net,
-                    from_bus=    int(line_map['FromBus'][i][1:])-1,
-                    to_bus=     int(line_map['ToBus'][i][1:])-1,
-                    length_km=2,
-                    name='L'+str(i+1),
-                    r_ohm_per_km=0.2,
-                    x_ohm_per_km=0.07,
-                    c_nf_per_km=0.3,
-                    max_i_ka=100)
-        
-        # plot the network
-        size = 5
-        d_c = plot.create_load_collection(net, loads=net.load.index, size=size)
-        
-        
-        #gen_colors = net.gen['color'].fillna('black').tolist()  # Default to black if no color set
-        gen_c = plot.create_gen_collection(net, gens=net.gen.index, size=size, orientation=0)
-        wind_c = plot.create_sgen_collection(net, sgens=net.sgen.index, size=size, orientation=3.14/2)
-        
-        bus_colors = net.bus['color'].fillna('black').tolist()  # Default to blue if no color set
-        bc = plot.create_bus_collection(net, buses=net.bus.index, size=size, 
-                                        zorder=10, color=bus_colors)
-        
-        lc = plot.create_line_collection(net, lines=net.line.index, zorder=1, use_bus_geodata=True, color='grey')
-        
-        # Make a legend for investments
-        legend_elements = [
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkred', markersize=10, label='Gas'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkviolet', markersize=10, label='Nuclear'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkorange', markersize=10, label='Solar'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='darkblue', markersize=10, label='Offshore Wind'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='lightblue', markersize=10, label='Onshore Wind'),
-            ]
-
-
-        plot.draw_collections([lc, d_c, gen_c, wind_c, bc])
-        plt.title("Network", fontsize=30)
-        plt.legend(handles=legend_elements, loc='upper right')
-        plt.show()
 
     def plot_prices(self):     
         # Plot boxplots of price distribution in each node
@@ -340,7 +253,7 @@ class InvestmentPlanning(Network):
                                             self.lmd[n][t] * self.variables.p_g[g][n][t]
                                             for g in self.INVESTMENTS for t in self.TIMES for n in self.NODES)
         
-        # Define NPV, including magic constant
+        # Define NPV
         npv = revenue - costs
 
         # Set objective
@@ -369,9 +282,9 @@ class InvestmentPlanning(Network):
     def _calculate_capture_prices(self):
         # Calculate capture price
         self.data.capture_prices = {
-            g : (np.sum(self.self.lmd[n][t] * self.data.investment_dispatch_values[t][g] for t in self.TIMES) /
-                    np.sum(self.data.investment_dispatch_values[t][g] for t in self.TIMES)) if self.data.investment_values[g] > 0 else None
-            for g in self.INVESTMENTS}
+            g : {n : (np.sum(self.lmd[n][t] * self.data.investment_dispatch_values[t][n][g] for t in self.TIMES) /
+                    np.sum(self.data.investment_dispatch_values[t][n][g] for t in self.TIMES)) if self.data.investment_values[g][n] > 0 else None
+            for n in self.NODES} for g in self.INVESTMENTS}
 
     def _save_data(self):
         # Save objective value
@@ -379,25 +292,14 @@ class InvestmentPlanning(Network):
         
         # Save investment values
         self.data.investment_values = {g : {n : self.variables.P_investment[g][n].x for n in self.NODES} for g in self.INVESTMENTS}
-        # self.data.capacities = {t :
-        #                         {**{g : self.data.investment_values[g]*self.fluxes[g][t_ix] for g in self.INVESTMENTS},
-        #                         **{g : self.P_G_max[g] for g in self.GENERATORS},
-        #                         **{g : self.P_W[t][g] for g in self.WINDTURBINES}}
-        #                         for t_ix, t in enumerate(self.TIMES)}
+        self.data.capacities = {t :
+                                {g : self.data.investment_values[g][n]*self.fluxes[g][t_ix] for g in self.INVESTMENTS for n in self.NODES}
+                                for t_ix, t in enumerate(self.TIMES)}
         
         # Save generation dispatch values
         self.data.investment_dispatch_values = {t : { n : {g : self.variables.p_g[g][n][t].x for g in self.INVESTMENTS} for n in self.NODES} for t in self.TIMES}
-        # self.data.generator_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.GENERATORS} for t in self.TIMES}
-        # self.data.windturbine_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.WINDTURBINES} for t in self.TIMES}
-        # self.data.all_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.PRODUCTION_UNITS} for t in self.TIMES}
-
-        # Save demand dispatch values
-        # self.data.demand_dispatch_values = {t : {d: self.variables.p_d[d][t].x for d in self.DEMANDS} for t in self.TIMES}
         
-        # Save uniform prices lambda
-        # self.data.lambda_ = {t : self.variables.lmd[t].x for t in self.TIMES}
-
-        # self._calculate_capture_prices()
+        self._calculate_capture_prices()
 
     def display_results(self):
         print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
