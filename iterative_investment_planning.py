@@ -149,7 +149,7 @@ class nodal_clearing(Network):
         self.data.generator_dispatch_values = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_G[g]} for g in self.GENERATORS}
 
         # Save generation dispatch values
-        self.data.investment_dispatch_values = {i : {n : {t : self.variables.p_g[i][n][t].x for t in self.TIMES} for n in self.node_I[i]} for i in self.INVESTMENTS}
+        self.data.investment_dispatch_values = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         
         # Save uniform prices lambda
         self.data.lambda_ = {n : {t : self.constraints.balance[n,t].pi for t in self.TIMES} for n in self.NODES}
@@ -157,14 +157,24 @@ class nodal_clearing(Network):
         # Save voltage angles
         self.data.theta = {n : {t : self.variables.theta[n][t].x for t in self.TIMES} for n in self.NODES}
 
+        costs = gb.quicksum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
+                            for g in self.INVESTMENTS for n in self.node_I[g])
+        # Define revenue (sum of generation revenues) [M€]
+        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
+                                            self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
+                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
+        
+        # Define NPV
+        self.data.npv = revenue - costs
+
     def run(self):
         self.model.setParam('OutputFlag', 0)
         self.model.optimize()
         self._save_data()
     
     def display_results(self):
-        NPV = np.sum(np.fromiter((self.data.investment_dispatch_values[i][n][t] * self.data.lambda_[n][t] for i in self.INVESTMENTS for n in self.node_I[i] for t in self.TIMES), float))
-        print('Actual NPV: \t{0} M€\n'.format(round(NPV,2)))
+        print('Actual NPV: \t{0} M€\n'.format(round(self.data.npv.getConstant(),2)))
         
 
     def plot_prices(self):     
@@ -233,7 +243,7 @@ class InvestmentPlanning(Network):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=500, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.model.update()
 
@@ -311,32 +321,46 @@ class InvestmentPlanning(Network):
  
 #%%
 if __name__ == '__main__':
-    # Model parameters
-    hours = 100*24
-    timelimit = 600
-    carbontax = 60
-    seed = 38
-    budget = 1000
+    Expected_NPV = []
+    Actual_NPV = []
+    for budget in np.logspace(0, 4, 9):
+        # Model parameters
+        hours = 61*24
+        timelimit = 600
+        carbontax = 60
+        seed = 38
+        # budget = 10
 
-    # Create nodal clearing instance without new investments for a price forecast
-    nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
-    nc.build_model()
-    nc.run()
-    # nc.plot_prices()
-    price_forcast = nc.data.lambda_
+        # Create nodal clearing instance without new investments for a price forecast
+        nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
+        nc.build_model()
+        nc.run()
+        # nc.plot_prices()
+        price_forcast = nc.data.lambda_
 
-    # Create investment planning instance with the price forecast
-    ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
-    ip.build_model()
-    ip.run()
-    ip.display_results()
-    investments=ip.data.investment_values
+        # Create investment planning instance with the price forecast
+        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
+        ip.build_model()
+        ip.run()
+        ip.display_results()
+        investments=ip.data.investment_values
+        Expected_NPV.append(ip.data.objective_value)
 
-    # Create nodal clearing instance with new investments
-    nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
-    nc.build_model()
-    nc.run()
-    nc.plot_prices()
-    nc.display_results()
+        # Create nodal clearing instance with new investments
+        nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
+        nc.build_model()
+        nc.run()
+        nc.display_results()
+        Actual_NPV.append(nc.data.npv.getConstant())
+        # nc.plot_prices()
+
+    plt.plot(Expected_NPV, label='Expected NPV')
+    plt.plot(Actual_NPV, label='Actual NPV')
+    plt.xscale('log')
+    plt.xlabel('Budget [M€]')
+    plt.yscale('log')
+    plt.ylabel('NPV [M€]')
+    plt.legend()
+    plt.show()
 
 # %%
