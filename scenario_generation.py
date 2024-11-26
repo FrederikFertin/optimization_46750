@@ -11,7 +11,7 @@ system_demand = pd.read_excel(xls, 'demand')
 
 demand_flux = pd.read_excel(cwd + '/data/load2023.xlsx').iloc[1:, :]
 demand_flux.columns = ['Datetime','Hour','Demand','Price']
-demand_flux['Datetime'] = pd.to_datetime(demand_flux['Date'])
+demand_flux['Datetime'] = pd.to_datetime(demand_flux['Datetime'])
 demand_flux['Hour'] = demand_flux['Hour'].astype(int)
 demand_flux['Demand'] = demand_flux['Demand'].astype(float)
 demand_flux['Price'] = demand_flux['Price'].astype(float)
