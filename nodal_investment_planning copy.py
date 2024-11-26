@@ -49,10 +49,10 @@ class InvestmentPlanning(Network):
 
     def _initialize_fluxes(self, hours):
         self.offshore_flux = np.ones(hours)
-        self.solar_flux = np.ones(hours)
-        self.gas_flux = np.ones(hours)
-        self.nuclear_flux = np.ones(hours)
-        self.onshore_flux = np.ones(hours)
+        self.solar_flux    = np.ones(hours)
+        self.gas_flux      = np.ones(hours)
+        self.nuclear_flux  = np.ones(hours)
+        self.onshore_flux  = np.ones(hours)
 
     def _initialize_times_and_demands(self, hours):
         if hours >= 24:
@@ -338,19 +338,20 @@ class InvestmentPlanning(Network):
     def display_results(self):
         print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
         print('Investment Capacities:')
-        for tech, investment in self.data.investment_values.items():
+        for g_type, nodal_investments in self.data.investment_values.items():
             capex = 0
-            for node, value in investment.items():
-                capex += value*self.CAPEX[tech]
-                if value > 0:
-                    print(f"{tech} at {node}: \t{round(value,2)} MW")
-            print(f"Capital cost for {tech}: \t\t{round(capex,2)} M€\n")
+            for node, investment_size in nodal_investments.items():
+                capex += investment_size*self.CAPEX[g_type]
+                if investment_size > 0:
+                    print(f"{g_type} at {node}: \t{round(investment_size,2)} MW")
+            if capex > 0: 
+                print(f"Capital cost for {g_type}: \t\t{round(capex,2)} M€\n")
 
     def plotNetwork(self):
         # create empty net
         net = pp.create_empty_network()
         cwd = os.path.dirname(__file__)
-        bus_map = pd.read_csv(cwd + '/data/bus_map.csv', delimiter=';')
+        bus_map = pd.read_csv(cwd + '/data/bus_map.csv', delimiter=';') # Move to Network class?
         
         line_map = pd.read_csv(cwd + '/data/lines.csv', delimiter=';')
         
@@ -360,11 +361,11 @@ class InvestmentPlanning(Network):
                         geodata=(bus_map['x-coord'][i], -bus_map['y-coord'][i]),
                         name=bus_map['Bus'][i])
             
-            for j in range(len(self.map_g[bus_map['Bus'][i]])):
+            for _ in range(len(self.map_g[bus_map['Bus'][i]])):
                 pp.create_gen(net, bus=i, p_mw=100)
-            for j in range(len(self.map_d[bus_map['Bus'][i]])):
+            for _ in range(len(self.map_d[bus_map['Bus'][i]])):
                 pp.create_load(net, bus=i, p_mw=100)
-            for j in range(len(self.map_w[bus_map['Bus'][i]])):
+            for _ in range(len(self.map_w[bus_map['Bus'][i]])):
                 pp.create_sgen(net, bus=i, p_mw=100)#, vm_pu=1.05)
             for g_type, nodal_investments in self.data.investment_values.items():
                 for node, investment_size in nodal_investments.items():
@@ -429,33 +430,27 @@ class InvestmentPlanning(Network):
         plt.legend(handles=legend_elements, loc='upper right')
         plt.show()
 
-    def plot_prices(self):
-        # Extract the time steps
-        times = list(self.data.lambda_.keys())
-        
-        # Extract nodes
-        nodes = list(self.data.lambda_[times[0]].keys())
-        
+    def plot_prices(self):     
         # Define a list of colors and line styles
         colors = ['blue', 'green', 'red', 'orange', 'purple', 'cyan']
         linestyles = ['-', '--']
 
         # Plot the nodal time series as stairs plots with unique colors and line styles
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        _, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
         # Plot the first 12 graphs in the upper plot
-        for i, node in enumerate(nodes[:12]):
-            lambda_values = [self.data.lambda_[t][node] for t in times]
+        for i, node in enumerate(self.NODES[:12]):
+            lambda_values = [self.data.lambda_[node][t] for t in self.TIMES]
             color = colors[i % len(colors)]
             linestyle = linestyles[i//6 % len(linestyles)]
-            ax1.plot(times, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
+            ax1.plot(self.TIMES, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
 
         # Plot the remaining graphs in the lower plot
-        for i, node in enumerate(nodes[12:]):
-            lambda_values = [self.data.lambda_[t][node] for t in times]
+        for i, node in enumerate(self.NODES[12:]):
+            lambda_values = [self.data.lambda_[node][t] for t in self.TIMES]
             color = colors[i % len(colors)]
             linestyle = linestyles[i//6 % len(linestyles)]
-            ax2.plot(times, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
+            ax2.plot(self.TIMES, lambda_values, drawstyle='steps', label=node, color=color, linestyle=linestyle)
 
         # Add labels and legend
         ax1.set_ylabel('Price [$/MWh]', fontsize=16)
@@ -542,3 +537,4 @@ if __name__ == '__main__':
     ip.plot_supply_demand_curve('T1')
     print()
 #%%
+ip.plot_prices()
