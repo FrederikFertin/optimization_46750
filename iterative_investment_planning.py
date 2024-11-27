@@ -51,12 +51,7 @@ class nodal_clearing(Network):
         self.nuclear_flux  = np.ones(hours)
         self.onshore_flux  = np.ones(hours)
 
-        # Establish fluxes (primarily capping generation capacities of renewables)
-        self.fluxes = {'Onshore Wind'  : self.onshore_flux,
-                       'Offshore Wind' : self.offshore_flux,
-                       'Solar'         : self.solar_flux,
-                       'Nuclear'       : self.nuclear_flux,
-                       'Gas'           : self.gas_flux}
+        
 
     def _initialize_times_and_demands(self, hours, timelimit):
         if hours >= 24:
@@ -82,6 +77,13 @@ class nodal_clearing(Network):
         self.C_G_offer = {g: self.C_G_offer[g] + (self.EF[g]*self.carbontax) for g in self.GENERATORS} # Variable costs in €/MWh incl. carbon tax
         self.C_I_offer = {g: self.v_OPEX[g] * 10**6 for g in self.INVESTMENTS} # Variable costs in €/MWh
         self.C_offer = {**self.C_G_offer, **self.C_I_offer, **self.C_W_offer} # Indexed by PRODUCTION_UNITS
+
+        # Establish fluxes (primarily capping generation capacities of renewables)
+        self.fluxes = {'Onshore Wind'  : self.onshore_flux,
+                       'Offshore Wind' : self.offshore_flux,
+                       'Solar'         : self.solar_flux,
+                       'Nuclear'       : self.nuclear_flux,
+                       'Gas'           : self.gas_flux}
 
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
 
@@ -149,7 +151,7 @@ class nodal_clearing(Network):
         self.data.generator_dispatch_values = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_G[g]} for g in self.GENERATORS}
 
         # Save generation dispatch values
-        self.data.investment_dispatch_values = {i : {n : {t : self.variables.p_g[i][n][t].x for t in self.TIMES} for n in self.node_I[i]} for i in self.INVESTMENTS}
+        self.data.investment_dispatch_values = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         
         # Save uniform prices lambda
         self.data.lambda_ = {n : {t : self.constraints.balance[n,t].pi for t in self.TIMES} for n in self.NODES}
@@ -157,21 +159,30 @@ class nodal_clearing(Network):
         # Save voltage angles
         self.data.theta = {n : {t : self.variables.theta[n][t].x for t in self.TIMES} for n in self.NODES}
 
+        # Save line flows
+        self.data.flow = {l : {t : self.variables.flow[l][t].x for t in self.TIMES} for l in self.LINES}
+        self.data.l_cap_l_dual = {l : {t : self.constraints.line_l_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
+        self.data.l_cap_u_dual = {l : {t : self.constraints.line_u_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
+
+        self.costs = np.sum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * np.sum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
+                            for g in self.INVESTMENTS for n in self.node_I[g])
+        # Define revenue (sum of generation revenues) [M€]
+        self.revenue = (8760 / self.T / 10**6) * np.sum(self.cf[g] * 
+                                            self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
+                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
+        
+        # Define NPV
+        self.data.npv = self.revenue - self.costs
+
     def run(self):
+        self.model.setParam('OutputFlag', 0)
         self.model.optimize()
         self._save_data()
     
     def display_results(self):
-        print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
-        print('Investment Capacities:')
-        for g_type, nodal_investments in self.data.investment_values.items():
-            capex = 0
-            for node, investment_size in nodal_investments.items():
-                capex += investment_size*self.CAPEX[g_type]
-                if investment_size > 0:
-                    print(f"{g_type} at {node}: \t{round(investment_size,2)} MW")
-            if capex > 0: 
-                print(f"Capital cost for {g_type}: \t\t{round(capex,2)} M€\n")
+        print('Actual NPV: \t{0} M€\n'.format(round(self.data.npv,2)))
+        
 
     def plot_prices(self):     
         # Plot boxplots of price distribution in each node
@@ -239,22 +250,22 @@ class InvestmentPlanning(Network):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for n in self.NODES} for g in self.INVESTMENTS}
-        self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.NODES} for g in self.INVESTMENTS}
+        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.model.update()
 
         """ Initialize objective to maximize NPV [M€] """
         # Define costs (annualized capital costs + fixed and variable operational costs)
-        costs = gb.quicksum(self.variables.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+        self.costs = gb.quicksum(self.variables.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
                             + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.variables.p_g[g][n][t] for t in self.TIMES)
-                            for g in self.INVESTMENTS for n in self.NODES)
+                            for g in self.INVESTMENTS for n in self.node_I[g])
         # Define revenue (sum of generation revenues) [M€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
+        self.revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
                                             self.lmd[n][t] * self.variables.p_g[g][n][t]
-                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.NODES)
+                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
         
         # Define NPV
-        npv = revenue - costs
+        npv = self.revenue - self.costs
 
         # Set objective
         self.model.setObjective(npv, gb.GRB.MAXIMIZE)
@@ -264,45 +275,46 @@ class InvestmentPlanning(Network):
         """ Initialize constraints """
         # Budget constraints
         self.constraints.budget = self.model.addConstr(gb.quicksum(
-                                    self.variables.P_investment[g][n] * self.CAPEX[g] for g in self.INVESTMENTS for n in self.NODES)
+                                    self.variables.P_investment[g][n] * self.CAPEX[g] for g in self.INVESTMENTS for n in self.node_I[g])
                                     <= self.BUDGET, name='budget')
         # Generation capacity limits
         self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[g][n][t] 
                                                                        <= self.variables.P_investment[g][n] * self.fluxes[g][t_ix]
-                                                                         for g in self.INVESTMENTS for n in self.NODES for t_ix, t in enumerate(self.TIMES)), name = "gen_cap_investments")
+                                                                         for g in self.INVESTMENTS for n in self.node_I[g] for t_ix, t in enumerate(self.TIMES)), name = "gen_cap_investments")
 
         # Set non-convex objective
         self.model.update()
 
 
     def run(self):
+        self.model.setParam('OutputFlag', 0)
         self.model.optimize()
         self._save_data()
     
     def _calculate_capture_prices(self):
         # Calculate capture price
         self.data.capture_prices = {
-            g : {n : (np.sum(self.lmd[n][t] * self.data.investment_dispatch_values[t][n][g] for t in self.TIMES) /
-                    np.sum(self.data.investment_dispatch_values[t][n][g] for t in self.TIMES)) if self.data.investment_values[g][n] > 0 else None
-            for n in self.NODES} for g in self.INVESTMENTS}
+            g : {n : (np.sum(np.fromiter((self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float)) /
+                    np.sum(np.fromiter((self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float))) if self.data.investment_values[g][n] > 0 else None
+            for n in self.node_I[g]} for g in self.INVESTMENTS}
 
     def _save_data(self):
         # Save objective value
         self.data.objective_value = self.model.ObjVal
         
         # Save investment values
-        self.data.investment_values = {g : {n : self.variables.P_investment[g][n].x for n in self.NODES} for g in self.INVESTMENTS}
+        self.data.investment_values = {g : {n : self.variables.P_investment[g][n].x for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.data.capacities = {t :
-                                {g : self.data.investment_values[g][n]*self.fluxes[g][t_ix] for g in self.INVESTMENTS for n in self.NODES}
+                                {g : self.data.investment_values[g][n]*self.fluxes[g][t_ix] for g in self.INVESTMENTS for n in self.node_I[g]}
                                 for t_ix, t in enumerate(self.TIMES)}
         
         # Save generation dispatch values
-        self.data.investment_dispatch_values = {t : { n : {g : self.variables.p_g[g][n][t].x for g in self.INVESTMENTS} for n in self.NODES} for t in self.TIMES}
+        self.data.investment_dispatch_values = {g : { n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         
         self._calculate_capture_prices()
 
     def display_results(self):
-        print('Maximal NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
+        print('Expected NPV: \t{0} M€\n'.format(round(self.data.objective_value,2)))
         print('Investment Capacities:')
         for g_type, nodal_investments in self.data.investment_values.items():
             capex = 0
@@ -317,30 +329,45 @@ class InvestmentPlanning(Network):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 20*24
+    hours = 180*24
     timelimit = 600
-    carbontax = 50
+    carbontax = 60
     seed = 38
-    budget = 1000
-    # Create nodal clearing instance without new investments for a price forecast
-    nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
-    nc.build_model()
-    nc.run()
-    nc.plot_prices()
-    price_forcast = nc.data.lambda_
+    expected_NPV = []
+    actual_NPV = []
 
-    # Create investment planning instance with the price forecast
+    # Create nodal clearing instance without new investments for a price forecast
+    nc_org = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
+    nc_org.build_model()
+    nc_org.run()
+    # nc.plot_prices()
+    price_forcast = nc_org.data.lambda_
+    p_forecast = pd.DataFrame(price_forcast)
+
+
+# %%
+for budget in np.logspace(0, 4, 10):
     ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
     ip.build_model()
     ip.run()
     ip.display_results()
     investments=ip.data.investment_values
+    expected_NPV.append(ip.data.objective_value)
 
     # Create nodal clearing instance with new investments
     nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
     nc.build_model()
     nc.run()
-    nc.plot_prices()
+    nc.display_results()
+    actual_NPV.append(nc.data.npv)
 
-
+# %%
+plt.plot(np.logspace(0, 4, 5), expected_NPV, label='Expected NPV')
+plt.plot(np.logspace(0, 4, 5), actual_NPV, label='Actual NPV')
+plt.xscale('log')
+plt.xlabel('Budget [M€]')
+plt.yscale('log')
+plt.ylabel('NPV [M€]')
+plt.legend()
+plt.show()
 # %%
