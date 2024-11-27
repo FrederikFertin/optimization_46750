@@ -157,7 +157,7 @@ class InvestmentPlanning(Network):
                                                             for d in self.DEMANDS for n in self.node_D[d] for t in self.TIMES), name = "derived_lagrange_demand")
         
         """ KKT for lagrange objective derived wrt. line flow variables (indirectly theta) """
-        self.constraints.line_f_lag = self.model.addConstrs(((self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t] + self.variables.rho_under[l][t] - self.variables.rho_over[l][t] == 0)
+        self.constraints.line_f_lag = self.model.addConstrs(((self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t] - self.variables.rho_under[l][t] + self.variables.rho_over[l][t] == 0)
                                                             for l in self.LINES for t in self.TIMES), name = "derived_lagrange_line_from")
         
         """ KKT for lagrange objective derived wrt. nodal voltage angle variables """
@@ -167,10 +167,10 @@ class InvestmentPlanning(Network):
                                                             + gb.quicksum(
                                                             (self.variables.rho_over[l][t] - self.variables.rho_under[l][t]) * self.L_susceptance[l]
                                                             for l in self.map_from[n])
-                                                            - gb.quicksum(
-                                                            (self.variables.rho_over[l][t] - self.variables.rho_under[l][t]) * self.L_susceptance[l]
+                                                            + gb.quicksum(
+                                                            (-self.variables.rho_over[l][t] + self.variables.rho_under[l][t]) * self.L_susceptance[l]
                                                             for l in self.map_to[n])
-                                                            - (self.variables.nu[t] if n == self.root_node else 0) == 0
+                                                            + (self.variables.nu[t] if n == self.root_node else 0) == 0
                                                             for n in self.NODES for t in self.TIMES), name = "derived_lagrange_angles")
 
         """ KKT for generation minimal production. Bi-linear are replaced by linearized constraints. Lower bound. """
