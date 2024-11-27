@@ -520,9 +520,12 @@ if __name__ == '__main__':
     chosen_days = []
     n_days = len(chosen_days)
     n_hours = 24 * n_days
+    n_hours = 5*24
+    budget = 1000
+    carbontax = 60
 
     # Either manually insert n_hours or manually insert chosen_days:
-    ip = InvestmentPlanning(hours=2, budget=1000, timelimit=1800, carbontax=60, seed=38, chosen_days=None)
+    ip = InvestmentPlanning(hours=n_hours, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=None)
 
     # Build model
     ip.build_model()
@@ -532,6 +535,9 @@ if __name__ == '__main__':
 
     # Display results
     ip.display_results()
-    ip.plot_network()
-    ip.plot_supply_demand_curve('T1')
-    ip.plot_prices()
+    #ip.plot_network()
+    #ip.plot_supply_demand_curve('T1')
+    #ip.plot_prices()
+    # Save investment planning data in a dataframe and then in a csv file
+    investment_values_df = pd.DataFrame(ip.data.investment_values)
+    investment_values_df.to_csv('results/investment_values,hours={n_hours},budget={budget},carbontax={carbontax},runtime={runtime}.csv'.format(n_hours=n_hours,budget=budget,carbontax=carbontax,runtime=ip.model.Runtime))
