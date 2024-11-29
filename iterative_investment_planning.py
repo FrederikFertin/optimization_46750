@@ -164,13 +164,13 @@ class nodal_clearing(Network):
         self.data.l_cap_l_dual = {l : {t : self.constraints.line_l_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
         self.data.l_cap_u_dual = {l : {t : self.constraints.line_u_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
 
-        self.costs = np.sum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.T * np.sum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
-                            for g in self.INVESTMENTS for n in self.node_I[g])
+        self.costs = np.sum(np.fromiter((self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * np.sum(np.fromiter((self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float))
+                            for g in self.INVESTMENTS for n in self.node_I[g]), float))
         # Define revenue (sum of generation revenues) [M€]
-        self.revenue = (8760 / self.T / 10**6) * np.sum(self.cf[g] * 
+        self.revenue = (8760 / self.T / 10**6) * np.sum(np.fromiter((self.cf[g] * 
                                             self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
-                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
+                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g]), float))
         
         # Define NPV
         self.data.npv = self.revenue - self.costs
@@ -329,7 +329,7 @@ class InvestmentPlanning(Network):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 180*24
+    hours = 90*24
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -340,13 +340,13 @@ if __name__ == '__main__':
     nc_org = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
     nc_org.build_model()
     nc_org.run()
-    # nc.plot_prices()
     price_forcast = nc_org.data.lambda_
     p_forecast = pd.DataFrame(price_forcast)
 
 
 # %%
-for budget in np.logspace(0, 4, 10):
+budgets = np.logspace(0, 3, 28)
+for budget in budgets: 
     ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
     ip.build_model()
     ip.run()
@@ -361,12 +361,13 @@ for budget in np.logspace(0, 4, 10):
     nc.display_results()
     actual_NPV.append(nc.data.npv)
 
-# %%
-plt.plot(np.logspace(0, 4, 5), expected_NPV, label='Expected NPV')
-plt.plot(np.logspace(0, 4, 5), actual_NPV, label='Actual NPV')
-plt.xscale('log')
+
+#%%
+plt.plot(budgets, expected_NPV, marker='o', label='Expected NPV')
+plt.plot(budgets, actual_NPV, marker = 'd', label='Actual NPV')
+# plt.xscale('log')
 plt.xlabel('Budget [M€]')
-plt.yscale('log')
+# plt.yscale('log')
 plt.ylabel('NPV [M€]')
 plt.legend()
 plt.show()
