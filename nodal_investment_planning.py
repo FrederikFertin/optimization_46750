@@ -73,6 +73,9 @@ class InvestmentPlanning(Network):
             #self.HOURS = ['T{0}'.format(t) for t in range(1, 24+1)]*days
         else:
             self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
+            demand_gain = 1
+            # Increase system demand for all hours and nodes
+            self.P_D = {key: {keyy : valuee*demand_gain for keyy, valuee in value.items()} for key, value in self.P_D.items()}
             #self.HOURS = self.TIMES
         # Establish fluxes (primarily capping generation capacities of renewables)
         self.fluxes = {'Onshore Wind': self.onshore_flux,
@@ -123,7 +126,7 @@ class InvestmentPlanning(Network):
                                                             for g in self.GENERATORS for t in self.TIMES for n in self.node_G[g]), name = "gen_cap_generators")
         self.constraints.p_wt_cap   = self.model.addConstrs((self.variables.p_g[w][n][t] <= self.P_W[t][w]
                                                             for w in self.WINDTURBINES for t in self.TIMES for n in self.node_W[w]), name = "gen_cap_windturbines")
-        self.constraints.p_inv_cap  = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.P_investment[i][n] * self.fluxes[i][t_ix]
+        self.constraints.p_inv_cap  = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.P_investment[i][n] * self.fluxes[i][t_ix] * self.cf[i]
                                                             for i in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES) for n in self.node_I[i]), name = "gen_cap_investments")
         # Demand magnitude constraints:
         self.constraints.demand_cap = self.model.addConstrs((self.variables.p_d[d][n][t] <= self.P_D[t][d]
@@ -183,7 +186,7 @@ class InvestmentPlanning(Network):
         self.constraints.wt_l_1     = self.model.addConstrs((self.variables.p_g[w][n][t] <= self.variables.b1[w][n][t] * self.P_W[t][w]
                                                             for w in self.WINDTURBINES for n in self.node_W[w] for t in self.TIMES), name = "windturbine_under_1")
         # New Investments:
-        self.constraints.inv_l_1    = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.b1[i][n][t] * self.variables.P_investment[i][n] * self.fluxes[i][t_ix]
+        self.constraints.inv_l_1    = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.b1[i][n][t] * self.variables.P_investment[i][n] * self.fluxes[i][t_ix] * self.cf[i]
                                                             for i in self.INVESTMENTS for n in self.node_I[i] for t_ix, t in enumerate(self.TIMES)), name = "investment_under_1")
         # Constraint mu_under == 0 for production units if b1 == 1:
         self.constraints.prod_l_2   = self.model.addConstrs((self.variables.mu_under[g][n][t] <= M * (1 - self.variables.b1[g][n][t])
@@ -204,7 +207,7 @@ class InvestmentPlanning(Network):
         self.constraints.wt_u_2     = self.model.addConstrs((self.variables.mu_over[w][n][t] <= M * (1 - self.variables.b2[w][n][t])
                                                             for w in self.WINDTURBINES for n in self.node_W[w] for t in self.TIMES), name = "gen_upper_windturbines_2")
         # New Investments:
-        self.constraints.inv_u_1    = self.model.addConstrs((self.variables.P_investment[i][n] * self.fluxes[i][t_ix]
+        self.constraints.inv_u_1    = self.model.addConstrs((self.variables.P_investment[i][n] * self.fluxes[i][t_ix] * self.cf[i]
                                                             - M * self.variables.b2[i][n][t] <= self.variables.p_g[i][n][t]
                                                             for i in self.INVESTMENTS for n in self.node_I[i] for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_1")
         self.constraints.inv_u_2    = self.model.addConstrs((self.variables.mu_over[i][n][t] <= M * (1 - self.variables.b2[i][n][t])
@@ -266,8 +269,7 @@ class InvestmentPlanning(Network):
                             + 8760/self.T * gb.quicksum(self.v_OPEX[i] * self.variables.p_g[i][n][t] for t in self.TIMES)
                             for i in self.INVESTMENTS for n in self.node_I[i])
         # Define revenue (sum of generation revenues) [M€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[i] * 
-                                            self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
+        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
                                             for i in self.INVESTMENTS for t in self.TIMES for n in self.node_I[i])
         
         # Define NPV, including magic constant
@@ -294,8 +296,8 @@ class InvestmentPlanning(Network):
         # Calculate capture price
         self.data.capture_prices = { i:
                                     {n:
-                                        (np.sum(self.data.lambda_[n][t] * self.data.investment_dispatch_values[t][i][n] for t in self.TIMES) /
-                                        np.sum(self.data.investment_dispatch_values[t][i][n] for t in self.TIMES))
+                                        (sum(self.data.lambda_[n][t] * self.data.investment_dispatch_values[t][i][n] for t in self.TIMES) /
+                                        sum(self.data.investment_dispatch_values[t][i][n] for t in self.TIMES))
                                         if self.data.investment_values[i][n] > 0
                                         else
                                         None
@@ -309,7 +311,7 @@ class InvestmentPlanning(Network):
         # Save investment values
         self.data.investment_values = {i : {n : self.variables.P_investment[i][n].x for n in self.node_I[i]} for i in self.INVESTMENTS}
         self.data.capacities = {t :
-                                {**{i : {n: self.data.investment_values[i][n]*self.fluxes[i][t_ix] for n in self.node_I[i]} for i in self.INVESTMENTS},
+                                {**{i : {n: self.data.investment_values[i][n]*self.fluxes[i][t_ix]*self.cf[i] for n in self.node_I[i]} for i in self.INVESTMENTS},
                                 **{g : {n: self.P_G_max[g] for n in self.node_G[g]} for g in self.GENERATORS},
                                 **{w : {n: self.P_W[t][w] for n in self.node_W[w]} for w in self.WINDTURBINES}}
                                 for t_ix, t in enumerate(self.TIMES)}
@@ -517,15 +519,15 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    chosen_days = []
+    chosen_days = [10, 190] # if it should be random then do: chosen_days = None
     n_days = len(chosen_days)
     n_hours = 24 * n_days
-    n_hours = 5*24
+    #n_hours = 10
     budget = 1000
     carbontax = 60
 
     # Either manually insert n_hours or manually insert chosen_days:
-    ip = InvestmentPlanning(hours=n_hours, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=None)
+    ip = InvestmentPlanning(hours=n_hours, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=chosen_days)
 
     # Build model
     ip.build_model()
