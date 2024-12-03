@@ -9,6 +9,7 @@ import pandapower.plotting as plot
 import matplotlib.pyplot as plt
 import os
 from matplotlib.lines import Line2D
+from iterative_investment_planning import nodal_clearing
 
 
 class expando(object):
@@ -117,6 +118,31 @@ class InvestmentPlanning(Network):
         self.variables.b5           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b5_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
         self.variables.b6           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b6_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
+    def _add_lower_level_variables_bounded(self):
+        # Define primal variables of lower level KKTs
+        self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
+        self.variables.flow         = {l: {t:       self.model.addVar(lb=-self.L_cap[l],ub=self.L_cap[l],   name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+
+        # Define dual variables of lower level KKTs
+        self.variables.nu           = {t:           self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
+        self.variables.lmd          = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
+        self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,             ub=self.C_offer[g], name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_over      = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.sigma_under  = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.sigma_over   = {d: {n: {t:   self.model.addVar(lb=0,             ub=self.U_D[d],     name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.rho_over     = {l: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.rho_under    = {l: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+
+        # Add binary auxiliary variables for bi-linear constraints
+        self.variables.b1           = {g: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.b2           = {g: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b2_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.b3           = {d: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b3_{0}_{1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.b4           = {d: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b4_{0}_{1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.b5           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b5_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.b6           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b6_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+
     def _add_primal_lower_level_constraints(self):
         """ Constraint ensuring value of flow is DC-OPF related to voltage angles """
         self.constraints.flow       = self.model.addConstrs((self.variables.flow[l][t] == self.L_susceptance[l] * (self.variables.theta[self.node_L_from[l]][t] - self.variables.theta[self.node_L_to[l]][t])
@@ -197,7 +223,7 @@ class InvestmentPlanning(Network):
                                                             for g in self.GENERATORS for n in self.node_G[g] for t in self.TIMES), name = "gen_upper_generators_2")
         # Existing Wind Turbines: 
         self.constraints.wt_u_1     = self.model.addConstrs((self.P_W[t][w] 
-                                                            - M * self.variables.b2[w][n][t] <= self.variables.p_g[w][n][t]
+                                                            - self.p_W_cap * self.variables.b2[w][n][t] <= self.variables.p_g[w][n][t]
                                                             for w in self.WINDTURBINES for n in self.node_W[w] for t in self.TIMES), name = "gen_upper_windturbines_1")
         self.constraints.wt_u_2     = self.model.addConstrs((self.variables.mu_over[w][n][t] <= M * (1 - self.variables.b2[w][n][t])
                                                             for w in self.WINDTURBINES for n in self.node_W[w] for t in self.TIMES), name = "gen_upper_windturbines_2")
@@ -254,7 +280,7 @@ class InvestmentPlanning(Network):
         self.variables.P_investment = {i : {n : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in tech {0} at node {1}'.format(i, n)) for n in self.node_I[i]} for i in self.INVESTMENTS}
         
         # Get lower level variables
-        self._add_lower_level_variables()
+        self._add_lower_level_variables_bounded()
 
         self.model.update()
 
@@ -518,7 +544,7 @@ if __name__ == '__main__':
     n_days = len(chosen_days)
     n_hours = 24 * n_days
     #n_hours = 10
-    budget = 1000
+    budget = 0
     carbontax = 60
 
     # Either manually insert n_hours or manually insert chosen_days:
