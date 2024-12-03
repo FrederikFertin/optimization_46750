@@ -157,7 +157,7 @@ class nodal_clearing(Network):
         # Define revenue (sum of generation revenues) [M€]
         self.revenue = (8760 / self.T / 10**6) * sum(self.cf[g] * 
                                             self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
-                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g]), float))
+                                            for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
         
         # Define NPV
         self.data.npv = self.revenue - self.costs
@@ -278,10 +278,9 @@ class InvestmentPlanning(Network):
     
     def _calculate_capture_prices(self):
         # Calculate capture price
-        self.data.capture_prices = {
-            g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
-                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None
-            for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.data.capture_prices = {g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
+                                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None 
+                                        for n in self.node_I[g]} for g in self.INVESTMENTS}
 
     def _save_data(self):
         # Save objective value
@@ -331,7 +330,7 @@ if __name__ == '__main__':
 
 
 # %%
-    budgets = np.linspace(0, 2000, 5)
+    budgets = np.log(np.linspace(1, 2000, 20))
     for budget in budgets:
         ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast)
         ip.build_model()
@@ -350,7 +349,7 @@ if __name__ == '__main__':
     # %%
     plt.plot(budgets, expected_NPV, label='Expected NPV')
     plt.plot(budgets, actual_NPV, label='Actual NPV')
-    # plt.xscale('log')
+    plt.xscale('log')
     plt.xlabel('Budget [M€]')
     # plt.yscale('log')
     plt.ylabel('NPV [M€]')
