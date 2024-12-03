@@ -105,7 +105,7 @@ class InvestmentPlanning(Network):
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_under_1")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * self.P_W[g] for g in self.WINDTURBINES for t in self.TIMES), name = "gen_under_1")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * M for g in self.INVESTMENTS for t in self.TIMES), name = "gen_under_1")
-        self.constraints.gen_under_2 = self.model.addConstrs((self.variables.mu_under[g][t] <= M * (1 - self.variables.z[g][t]) * M for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under_2") 
+        self.constraints.gen_under_2 = self.model.addConstrs((self.variables.mu_under[g][t] <= M * (1 - self.variables.z[g][t]) for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under_2") 
 
         # KKT for generation capacities. Bi-linear are replaced by linearized constraints
         # self.constraints.gen_upper_generators = self.model.addConstrs(((self.variables.p_g[g][t] - self.P_G_max[g]) * self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "gen_upper_generators")
@@ -126,7 +126,7 @@ class InvestmentPlanning(Network):
         # KKT for demand constraints. Bi-linear are replaced by linearized constraints
         # self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.y[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
-        self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.y[d][t]) * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
+        self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.y[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         
         
         # Redundant constraints
@@ -262,7 +262,7 @@ class InvestmentPlanning(Network):
         return dispatch_cumulative, offers, capacity_cumulative
         
     def plot_supply_demand_curve(self, T: str):
-
+        plt.figure(figsize=(10, 6))
         dispatch_cumulative, offers, capacity_cumulative = self._get_supply_curve_info(T)
         bought_cumulative, bids, demand_cumulative = self._get_demand_curve_info(T)
         plt.step(np.array(capacity_cumulative), np.array(offers), label='Supply', )
@@ -275,6 +275,28 @@ class InvestmentPlanning(Network):
         plt.xlim(0, max(capacity_cumulative.max(), demand_cumulative.max()))
         plt.legend()
         plt.grid()
+        plt.show()
+    
+    def plot_clearing_prices(self):
+        data = [ip.data.lambda_[t] for t in ip.TIMES]
+        plt.figure(figsize=(10, 6))
+
+        # Plot the data
+        plt.plot(data, label='Power Price', linewidth=2)
+
+        # Add labels and title
+        plt.xlabel('Time', fontsize=12)
+        plt.ylabel('Power Price [€/MWh]', fontsize=12)
+        plt.title('Clearing Prices', fontsize=14)
+
+        # Add only horizontal grid lines
+        plt.grid(axis='y', linestyle='--', color='gray', alpha=0.7)
+
+        # Improve layout with tight layout and legend
+        plt.tight_layout()
+        plt.legend()
+
+        # Show the plot
         plt.show()
 
     def display_results(self):
@@ -291,7 +313,7 @@ if __name__ == '__main__':
     # Carbon TAX price: https://www.eex.com/en/market-data/emission-allowances/eua-auction-results
     
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=2*24, budget=1000, timelimit=30, carbontax=60, seed=38)
+    ip = InvestmentPlanning(hours=20*24, budget=1000, timelimit=600, carbontax=60, seed=38)
 
     # Build model
     ip.build_model()

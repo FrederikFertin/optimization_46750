@@ -3,6 +3,7 @@ import gurobipy as gb
 from network import Network
 from gurobipy import GRB
 import numpy as np
+import random
 import pandas as pd
 import pandapower as pp
 import pandapower.plotting as plot
@@ -19,14 +20,7 @@ class expando(object):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self, 
-                 hours:int = 24,
-                 budget:float = 100,
-                 timelimit:float = 100,
-                 carbontax:float = 50,
-                 seed:int = 42,
-                 chosen_days:list[int] = None,
-                ):
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float = 100, carbontax:float = 50, seed:int = 42): # initialize class
         super().__init__()
 
         np.random.seed(seed)
@@ -36,16 +30,16 @@ class InvestmentPlanning(Network):
         self.constraints = expando() # build constraint attributes
         self.results = expando() # build results attributes
         
-        self.T = hours # set number of hours in optimization
-        self.carbontax = carbontax # set carbon tax in €/tCO2
-        self.BUDGET = budget # set budget for capital costs in M€
-        self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-        self.chosen_days = chosen_days # set chosen days
+        self.T = hours
+        self.carbontax = carbontax
+        self.chosen_days = None
         self.root_node = 'N1'
+        self.other_nodes = self.NODES.copy()
+        self.other_nodes.remove(self.root_node)
 
         self._initialize_fluxes(hours)
         self._initialize_times_and_demands(hours)
-        self._initialize_costs()
+        self._initialize_costs_and_budget(budget, timelimit)
 
     def _initialize_fluxes(self, hours):
         self.offshore_flux = np.ones(hours)
@@ -58,8 +52,7 @@ class InvestmentPlanning(Network):
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
             days = hours // 24
-            if self.chosen_days is None:
-                self.chosen_days = np.random.choice(range(365), days, replace=False)
+            self.chosen_days = np.random.choice(range(365), days, replace=False)
             self.cf = {g: 1 for g in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
 
             self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
@@ -73,35 +66,36 @@ class InvestmentPlanning(Network):
             #self.HOURS = ['T{0}'.format(t) for t in range(1, 24+1)]*days
         else:
             self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
-            demand_gain = 1
-            # Increase system demand for all hours and nodes
-            self.P_D = {key: {keyy : valuee*demand_gain for keyy, valuee in value.items()} for key, value in self.P_D.items()}
             #self.HOURS = self.TIMES
-        # Establish fluxes (primarily capping generation capacities of renewables)
-        self.fluxes = {'Onshore Wind': self.onshore_flux,
-                       'Offshore Wind': self.offshore_flux,
-                       'Solar': self.solar_flux,
-                       'Nuclear': self.nuclear_flux,
-                       'Gas': self.gas_flux}
 
-    def _initialize_costs(self):        
+    def _initialize_costs_and_budget(self, budget, timelimit):
+        # Establish fluxes (primarily capping generation capacities of renewables)
+        self.fluxes = {'Onshore Wind'  : self.onshore_flux,
+                       'Offshore Wind' : self.offshore_flux,
+                       'Solar'         : self.solar_flux,
+                       'Nuclear'       : self.nuclear_flux,
+                       'Gas'           : self.gas_flux}
+        
         # Define generation costs
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
         self.node_production = {**self.node_G, **self.node_I, **self.node_W}
-        self.C_G_offer_modified = {g: round(self.C_G_offer[g] + (self.EF[g]*self.carbontax), 2) for g in self.GENERATORS} # Variable costs in €/MWh incl. carbon tax
-        self.C_I_offer = {g: round(self.v_OPEX[g] * 10**6, 2) for g in self.INVESTMENTS} # Variable costs in €/MWh
-        self.C_offer = {**self.C_G_offer_modified, **self.C_I_offer, **self.C_W_offer} # Indexed by PRODUCTION_UNITS
+        self.C_G_offer = {g: self.C_G_offer[g] + (self.EF[g]*self.carbontax) for g in self.GENERATORS} # Variable costs in €/MWh incl. carbon tax
+        self.C_I_offer = {g: self.v_OPEX[g] * 10**6 for g in self.INVESTMENTS} # Variable costs in €/MWh
+        self.C_offer = {**self.C_G_offer, **self.C_I_offer, **self.C_W_offer} # Indexed by PRODUCTION_UNITS
+
+        self.BUDGET = budget # set budget for capital costs in M€
+        self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
 
     def _add_lower_level_variables(self):
         # Define primal variables of lower level KKTs
         self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
         self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
-        self.variables.flow         = {l: {t:       self.model.addVar(lb=-self.L_cap[l],ub=self.L_cap[l],name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.flow         = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         # Define dual variables of lower level KKTs
         self.variables.nu           = {t:           self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
-        self.variables.lmd          = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
+        self.variables.lmd          = {n: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY, name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.mu_over      = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under  = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
@@ -126,7 +120,7 @@ class InvestmentPlanning(Network):
                                                             for g in self.GENERATORS for t in self.TIMES for n in self.node_G[g]), name = "gen_cap_generators")
         self.constraints.p_wt_cap   = self.model.addConstrs((self.variables.p_g[w][n][t] <= self.P_W[t][w]
                                                             for w in self.WINDTURBINES for t in self.TIMES for n in self.node_W[w]), name = "gen_cap_windturbines")
-        self.constraints.p_inv_cap  = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.P_investment[i][n] * self.fluxes[i][t_ix] * self.cf[i]
+        self.constraints.p_inv_cap  = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.P_investment[i][n] * self.fluxes[i][t_ix]
                                                             for i in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES) for n in self.node_I[i]), name = "gen_cap_investments")
         # Demand magnitude constraints:
         self.constraints.demand_cap = self.model.addConstrs((self.variables.p_d[d][n][t] <= self.P_D[t][d]
@@ -139,9 +133,18 @@ class InvestmentPlanning(Network):
                                                             + gb.quicksum(self.variables.flow[l][t]     for l in self.map_from[n])
                                                             - gb.quicksum(self.variables.flow[l][t]     for l in self.map_to[n]) == 0
                                                             for n in self.NODES for t in self.TIMES), name = "balance")
+        # Line capacity constraints:
+        self.constraints.line_l_cap = self.model.addConstrs((-self.variables.flow[l][t] <= self.L_cap[l]
+                                                            for l in self.LINES for t in self.TIMES), name = "line_cap_lower")
+        self.constraints.line_u_cap = self.model.addConstrs((self.variables.flow[l][t]  <= self.L_cap[l]
+                                                            for l in self.LINES for t in self.TIMES), name = "line_cap_lower")
         # Reference voltage angle:
         self.constraints.ref_angle  = self.model.addConstrs((  self.variables.theta[self.root_node][t] == 0
                                                             for t in self.TIMES), name = "ref_angle")
+        self.constraints.angle_u    = self.model.addConstrs((  self.variables.theta[n][t] <= np.pi
+                                                            for n in self.NODES for t in self.TIMES), name = "angle_upper_limit") # Can these limits be imposed in the definition of the variable?
+        self.constraints.angle_l    = self.model.addConstrs((- self.variables.theta[n][t] <= np.pi
+                                                            for n in self.NODES for t in self.TIMES), name = "angle_lower_limit")
 
     def _add_dual_lower_level_constraints(self):
         M = 2*max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
@@ -154,21 +157,21 @@ class InvestmentPlanning(Network):
         self.constraints.dem_lag    = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[n][t] - self.variables.sigma_under[d][n][t] + self.variables.sigma_over[d][n][t] == 0
                                                             for d in self.DEMANDS for n in self.node_D[d] for t in self.TIMES), name = "derived_lagrange_demand")
         
-        """ KKT for lagrange objective derived wrt. line flow variables (indirectly theta) """
-        self.constraints.line_f_lag = self.model.addConstrs(((self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t] - self.variables.rho_under[l][t] + self.variables.rho_over[l][t] == 0)
+        """ KKT for lagrange objective derived wrt. line flow variables """
+        self.constraints.line_f_lag = self.model.addConstrs(((self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t] + self.variables.rho_under[l][t] - self.variables.rho_over[l][t] == 0)
                                                             for l in self.LINES for t in self.TIMES), name = "derived_lagrange_line_from")
         
-        """ KKT for lagrange objective derived wrt. nodal voltage angle variables """
+        """ KKT for lagrange objective derived wrt. root node voltage angle variable """
         self.constraints.angle_lags = self.model.addConstrs(( gb.quicksum(
                                                             (self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t]) * self.L_susceptance[l]
                                                             for l in (self.map_from[n] + self.map_to[n]))
                                                             + gb.quicksum(
                                                             (self.variables.rho_over[l][t] - self.variables.rho_under[l][t]) * self.L_susceptance[l]
                                                             for l in self.map_from[n])
-                                                            + gb.quicksum(
-                                                            (-self.variables.rho_over[l][t] + self.variables.rho_under[l][t]) * self.L_susceptance[l]
+                                                            - gb.quicksum(
+                                                            (self.variables.rho_over[l][t] - self.variables.rho_under[l][t]) * self.L_susceptance[l]
                                                             for l in self.map_to[n])
-                                                            + (self.variables.nu[t] if n == self.root_node else 0) == 0
+                                                            - (self.variables.nu[t] if n == self.root_node else 0) == 0
                                                             for n in self.NODES for t in self.TIMES), name = "derived_lagrange_angles")
 
         """ KKT for generation minimal production. Bi-linear are replaced by linearized constraints. Lower bound. """
@@ -181,7 +184,7 @@ class InvestmentPlanning(Network):
         self.constraints.wt_l_1     = self.model.addConstrs((self.variables.p_g[w][n][t] <= self.variables.b1[w][n][t] * self.P_W[t][w]
                                                             for w in self.WINDTURBINES for n in self.node_W[w] for t in self.TIMES), name = "windturbine_under_1")
         # New Investments:
-        self.constraints.inv_l_1    = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.b1[i][n][t] * self.variables.P_investment[i][n] * self.fluxes[i][t_ix] * self.cf[i]
+        self.constraints.inv_l_1    = self.model.addConstrs((self.variables.p_g[i][n][t] <= self.variables.b1[i][n][t] * self.variables.P_investment[i][n] * self.fluxes[i][t_ix]
                                                             for i in self.INVESTMENTS for n in self.node_I[i] for t_ix, t in enumerate(self.TIMES)), name = "investment_under_1")
         # Constraint mu_under == 0 for production units if b1 == 1:
         self.constraints.prod_l_2   = self.model.addConstrs((self.variables.mu_under[g][n][t] <= M * (1 - self.variables.b1[g][n][t])
@@ -202,7 +205,7 @@ class InvestmentPlanning(Network):
         self.constraints.wt_u_2     = self.model.addConstrs((self.variables.mu_over[w][n][t] <= M * (1 - self.variables.b2[w][n][t])
                                                             for w in self.WINDTURBINES for n in self.node_W[w] for t in self.TIMES), name = "gen_upper_windturbines_2")
         # New Investments:
-        self.constraints.inv_u_1    = self.model.addConstrs((self.variables.P_investment[i][n] * self.fluxes[i][t_ix] * self.cf[i]
+        self.constraints.inv_u_1    = self.model.addConstrs((self.variables.P_investment[i][n] * self.fluxes[i][t_ix]
                                                             - M * self.variables.b2[i][n][t] <= self.variables.p_g[i][n][t]
                                                             for i in self.INVESTMENTS for n in self.node_I[i] for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_1")
         self.constraints.inv_u_2    = self.model.addConstrs((self.variables.mu_over[i][n][t] <= M * (1 - self.variables.b2[i][n][t])
@@ -264,7 +267,8 @@ class InvestmentPlanning(Network):
                             + 8760/self.T * gb.quicksum(self.v_OPEX[i] * self.variables.p_g[i][n][t] for t in self.TIMES)
                             for i in self.INVESTMENTS for n in self.node_I[i])
         # Define revenue (sum of generation revenues) [M€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
+        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[i] * 
+                                            self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
                                             for i in self.INVESTMENTS for t in self.TIMES for n in self.node_I[i])
         
         # Define NPV, including magic constant
@@ -287,46 +291,21 @@ class InvestmentPlanning(Network):
         self.model.Params.NonConvex = 2
         self.model.update()
 
-    def _calculate_capture_prices(self):
-        # Calculate capture price
-        self.data.capture_prices = { i:
-                                    {n:
-                                        (sum(self.data.lambda_[n][t] * self.data.investment_dispatch_values[t][i][n] for t in self.TIMES) /
-                                        sum(self.data.investment_dispatch_values[t][i][n] for t in self.TIMES))
-                                        if self.data.investment_values[i][n] > 0
-                                        else
-                                        None
-                                    for n in self.node_I[i]} 
-                                    for i in self.INVESTMENTS}
-
     def _save_data(self):
         # Save objective value
         self.data.objective_value = self.model.ObjVal
         
         # Save investment values
         self.data.investment_values = {i : {n : self.variables.P_investment[i][n].x for n in self.node_I[i]} for i in self.INVESTMENTS}
-        self.data.capacities = {t :
-                                {**{i : {n: self.data.investment_values[i][n]*self.fluxes[i][t_ix]*self.cf[i] for n in self.node_I[i]} for i in self.INVESTMENTS},
-                                **{g : {n: self.P_G_max[g] for n in self.node_G[g]} for g in self.GENERATORS},
-                                **{w : {n: self.P_W[t][w] for n in self.node_W[w]} for w in self.WINDTURBINES}}
-                                for t_ix, t in enumerate(self.TIMES)}
         
         # Save generation dispatch values
-        self.data.investment_dispatch_values = {t : {i : {n : self.variables.p_g[i][n][t].x for n in self.node_I[i]} for i in self.INVESTMENTS} for t in self.TIMES}
-        self.data.generator_dispatch_values = {t : {g : {n : self.variables.p_g[g][n][t].x for n in self.node_G[g]} for g in self.GENERATORS} for t in self.TIMES}
-        self.data.windturbine_dispatch_values = {t : {w : {n : self.variables.p_g[w][n][t].x for n in self.node_W[w]} for w in self.WINDTURBINES} for t in self.TIMES}
-        self.data.all_dispatch_values = {t : {g : {n : self.variables.p_g[g][n][t].x for n in self.node_production[g]} for g in self.PRODUCTION_UNITS} for t in self.TIMES}
+        self.data.investment_dispatch_values = {i : {n : {t : self.variables.p_g[i][n][t].x for t in self.TIMES} for n in self.node_I[i]} for i in self.INVESTMENTS}
         
-        # Save demand dispatch values
-        self.data.demand_dispatch_values = {t : {d: {n : self.variables.p_d[d][n][t].x for n in self.node_D[d]} for d in self.DEMANDS} for t in self.TIMES}
-
         # Save uniform prices lambda
         self.data.lambda_ = {n : {t : self.variables.lmd[n][t].x for t in self.TIMES} for n in self.NODES}
 
         # Save voltage angles
         self.data.theta = {n : {t : self.variables.theta[n][t].x for t in self.TIMES} for n in self.NODES}
-
-        self._calculate_capture_prices()
 
     def run(self):
         self.model.optimize()
@@ -344,7 +323,7 @@ class InvestmentPlanning(Network):
             if capex > 0: 
                 print(f"Capital cost for {g_type}: \t\t{round(capex,2)} M€\n")
 
-    def plot_network(self):
+    def plotNetwork(self):
         # create empty net
         net = pp.create_empty_network()
         cwd = os.path.dirname(__file__)
@@ -460,82 +439,19 @@ class InvestmentPlanning(Network):
         plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.1)
         plt.show()
 
-    def _get_demand_curve_info(self, T: str):
-        bids = pd.Series(self.U_D).sort_values(ascending=False)
-        #dispatch = pd.Series(self.data.demand_dispatch_values[T]).loc[bids.index]
-        demand = pd.Series(self.P_D[T]).loc[bids.index]
-        #dispatch_cumulative = dispatch.copy()
-        demand_cumulative = demand.cumsum()
-        #dispatch_cumulative = pd.concat([pd.Series([0]), dispatch_cumulative])
-        demand_cumulative = pd.concat([pd.Series([0]), demand_cumulative])
-        bids = pd.concat([pd.Series([bids.iloc[0]]), bids])
-        
-        return bids, demand_cumulative, #dispatch_cumulative
-    
-    def _get_supply_curve_info(self, T: str):
-        self.C_offer_modified = self.C_offer.copy()
-        for i in self.INVESTMENTS:
-            del self.C_offer_modified[i]
-            for n in self.node_I[i]:
-                self.C_offer_modified[(i,n)] = self.C_offer[i]
-        offers = pd.Series(self.C_offer_modified).sort_values(ascending=True)
-        #dispatch = pd.Series(self.data.all_dispatch_values[T]).loc[offers.index]
-        capacity = pd.Series()
-        for gen, offer in offers.items():
-            if gen in self.GENERATORS:
-                capacity[gen] = self.P_G_max[gen]
-            elif gen in self.WINDTURBINES:
-                capacity[gen] = self.P_W[T][gen]
-            else:
-                capacity[str(gen)] = self.data.investment_values[gen[0]][gen[1]]*self.fluxes[gen[0]][self.TIMES.index(T)]
-        #capacity = pd.Series(self.data.capacities[T]).loc[offers.index]
-        #dispatch_cumulative = dispatch.cumsum()
-        capacity_cumulative = capacity.cumsum()
-        #dispatch_cumulative = pd.concat([pd.Series([0]), dispatch_cumulative])
-        capacity_cumulative = pd.concat([pd.Series([0]), capacity_cumulative])
-        offers = pd.concat([pd.Series(offers.iloc[0]), offers])
-        
-        return offers, capacity_cumulative, #dispatch_cumulative
-        
-    def plot_supply_demand_curve(self, T: str):
 
-        offers, capacity_cumulative = self._get_supply_curve_info(T)
-        bids, demand_cumulative = self._get_demand_curve_info(T)
-        plt.step(np.array(capacity_cumulative), np.array(offers), label='Supply', )
-        plt.step(np.array(demand_cumulative), np.array(bids), label='Demand', )
-        
-        plt.xlabel('Quantity [MWh]')
-        plt.ylabel('Power Price [€/MWh]')
-        plt.title('Supply/Demand curve for time {0}'.format(T))
-        plt.xlim(0, max(capacity_cumulative.max(), demand_cumulative.max())*1.1)
-        plt.legend()
-        plt.grid()
-        plt.show()
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    chosen_days = [10, 190] # if it should be random then do: chosen_days = None
-    n_days = len(chosen_days)
-    n_hours = 24 * n_days
-    #n_hours = 10
-    budget = 1000
-    carbontax = 60
-
-    # Either manually insert n_hours or manually insert chosen_days:
-    ip = InvestmentPlanning(hours=n_hours, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=chosen_days)
-    ip = InvestmentPlanning(hours=15, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=None)
-
+    ip = InvestmentPlanning(hours=12, budget=450, timelimit=300, carbontax=50, seed=38)
     # Build model
     ip.build_model()
-
     # Run optimization
     ip.run()
-
     # Display results
+
     ip.display_results()
-    #ip.plot_network()
-    #ip.plot_supply_demand_curve('T1')
-    #ip.plot_prices()
-    # Save investment planning data in a dataframe and then in a csv file
-    investment_values_df = pd.DataFrame(ip.data.investment_values)
-    investment_values_df.to_csv('results/investment_values,hours={n_hours},budget={budget},carbontax={carbontax},runtime={runtime}.csv'.format(n_hours=n_hours,budget=budget,carbontax=carbontax,runtime=ip.model.Runtime))
+    ip.plotNetwork()
+    
+#%%
+ip.plot_prices()
