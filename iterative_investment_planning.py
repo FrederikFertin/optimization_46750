@@ -346,7 +346,7 @@ if __name__ == '__main__':
 
 
 # %%
-for budget in np.logspace(0, 4, 10):
+for budget in [1000]:
     ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
     ip.build_model()
     ip.run()

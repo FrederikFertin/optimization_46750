@@ -97,7 +97,7 @@ class InvestmentPlanning(Network):
         self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
         self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
-        self.variables.flow         = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.flow         = {l: {t:       self.model.addVar(lb=-self.L_cap[l],ub=self.L_cap[l],name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         # Define dual variables of lower level KKTs
         self.variables.nu           = {t:           self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
@@ -139,11 +139,6 @@ class InvestmentPlanning(Network):
                                                             + gb.quicksum(self.variables.flow[l][t]     for l in self.map_from[n])
                                                             - gb.quicksum(self.variables.flow[l][t]     for l in self.map_to[n]) == 0
                                                             for n in self.NODES for t in self.TIMES), name = "balance")
-        # Line capacity constraints:
-        self.constraints.line_l_cap = self.model.addConstrs((-self.variables.flow[l][t] <= self.L_cap[l]
-                                                            for l in self.LINES for t in self.TIMES), name = "line_cap_lower")
-        self.constraints.line_u_cap = self.model.addConstrs((self.variables.flow[l][t]  <= self.L_cap[l]
-                                                            for l in self.LINES for t in self.TIMES), name = "line_cap_lower")
         # Reference voltage angle:
         self.constraints.ref_angle  = self.model.addConstrs((  self.variables.theta[self.root_node][t] == 0
                                                             for t in self.TIMES), name = "ref_angle")
@@ -528,6 +523,7 @@ if __name__ == '__main__':
 
     # Either manually insert n_hours or manually insert chosen_days:
     ip = InvestmentPlanning(hours=n_hours, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=chosen_days)
+    ip = InvestmentPlanning(hours=15, budget=budget, timelimit=24*3600, carbontax=carbontax, seed=38, chosen_days=None)
 
     # Build model
     ip.build_model()
