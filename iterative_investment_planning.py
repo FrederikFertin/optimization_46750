@@ -3,13 +3,9 @@ import gurobipy as gb
 from network import Network
 from gurobipy import GRB
 import numpy as np
-import random
 import pandas as pd
-import pandapower as pp
-import pandapower.plotting as plot
 import matplotlib.pyplot as plt
-import os
-from matplotlib.lines import Line2D
+
 
 
 class expando(object):
@@ -97,7 +93,7 @@ class nodal_clearing(Network):
         """ Initialize variables """
         self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.theta        = {n: {t:       self.model.addVar(lb=-np.pi,        ub=np.pi,        name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
+        self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
         self.variables.flow         = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         """ Initialize objective function """
@@ -136,11 +132,7 @@ class nodal_clearing(Network):
         # Reference voltage angle:
         self.constraints.ref_angle  = self.model.addConstrs((  self.variables.theta[self.root_node][t] == 0
                                                             for t in self.TIMES), name = "ref_angle")
-        self.constraints.angle_u    = self.model.addConstrs((  self.variables.theta[n][t] <= np.pi
-                                                            for n in self.NODES for t in self.TIMES), name = "angle_upper_limit") # Can these limits be imposed in the definition of the variable?
-        self.constraints.angle_l    = self.model.addConstrs((- self.variables.theta[n][t] <= np.pi
-                                                            for n in self.NODES for t in self.TIMES), name = "angle_lower_limit")
-
+        
         self.model.update()
 
     def _save_data(self):
@@ -346,28 +338,28 @@ if __name__ == '__main__':
 
 
 # %%
-for budget in np.logspace(0, 4, 10):
-    ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
-    ip.build_model()
-    ip.run()
-    ip.display_results()
-    investments=ip.data.investment_values
-    expected_NPV.append(ip.data.objective_value)
+    for budget in np.logspace(0, 4, 10):
+        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
+        ip.build_model()
+        ip.run()
+        ip.display_results()
+        investments=ip.data.investment_values
+        expected_NPV.append(ip.data.objective_value)
 
-    # Create nodal clearing instance with new investments
-    nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
-    nc.build_model()
-    nc.run()
-    nc.display_results()
-    actual_NPV.append(nc.data.npv)
+        # Create nodal clearing instance with new investments
+        nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
+        nc.build_model()
+        nc.run()
+        nc.display_results()
+        actual_NPV.append(nc.data.npv)
 
-# %%
-plt.plot(np.logspace(0, 4, 5), expected_NPV, label='Expected NPV')
-plt.plot(np.logspace(0, 4, 5), actual_NPV, label='Actual NPV')
-plt.xscale('log')
-plt.xlabel('Budget [M€]')
-plt.yscale('log')
-plt.ylabel('NPV [M€]')
-plt.legend()
-plt.show()
+    # %%
+    plt.plot(np.logspace(0, 4, 5), expected_NPV, label='Expected NPV')
+    plt.plot(np.logspace(0, 4, 5), actual_NPV, label='Actual NPV')
+    plt.xscale('log')
+    plt.xlabel('Budget [M€]')
+    plt.yscale('log')
+    plt.ylabel('NPV [M€]')
+    plt.legend()
+    plt.show()
 # %%
