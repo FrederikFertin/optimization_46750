@@ -1,7 +1,8 @@
+#%%
 import numpy as np
 import pandas as pd
 import os
-
+#%%
 class Network:
     wind = False
 
@@ -79,7 +80,7 @@ class Network:
     LCOE = {}
     for key in INVESTMENTS:
         LCOE[key] = ((CAPEX[key] * AF[key] + f_OPEX[key])/(cf[key]*8760) + v_OPEX[key]) * 10**6
-    node_I = dict(zip(INVESTMENTS, [NODES]*len(INVESTMENTS))) # Node placements of investments
+    node_I = dict(zip(INVESTMENTS, [['N1', 'N10', 'N16', 'N24']]*len(INVESTMENTS))) # Node placements of investments
     map_i = {}
     for number, node in enumerate(NODES):
         n = number + 1
@@ -95,7 +96,7 @@ class Network:
     C_G_offer = dict(zip(GENERATORS, gen_econ['C'])) # Generator day-ahead offer price
     P_R_DW = dict(zip(GENERATORS, gen_tech['R_D'])) # Up-ramping of generator
     P_R_UP = dict(zip(GENERATORS, gen_tech['R_U'])) # Down-ramping of generator
-    node_G = dict(zip(GENERATORS, gen_tech['Node'])) # Generator node placements
+    node_G_ = dict(zip(GENERATORS, gen_tech['Node'])) # Generator node placements
     P_R_PLUS = dict(zip(GENERATORS, gen_tech['R_plus'])) # Up reserve capacity
     P_R_MINUS = dict(zip(GENERATORS, gen_tech['R_minus'])) # Down reserve capacity
     C_U = dict(zip(GENERATORS, gen_econ['C_u'])) # Up reserve cost
@@ -109,18 +110,18 @@ class Network:
         P_D[key] = dict(zip(DEMANDS, load_info['load_percent']/100 * system_demand['System_demand'][t]))
     
     U_D = dict(zip(DEMANDS, load_info['bid_price'])) # Demand bidding price <- set values in excel
-    node_D = dict(zip(DEMANDS, load_info['Node'])) # Load node placements
+    node_D_ = dict(zip(DEMANDS, load_info['Node'])) # Load node placements
     U_D_curt = 400 # cost of demand curtailment in BM [$/MWh]
     
     ## Wind Turbine Information
-    C_W_offer = dict(zip(WINDTURBINES, W * [v_OPEX['Offshore Wind'] * 10**6])) # Wind farm day-ahead offer price
+    C_W_offer = dict(zip(WINDTURBINES, W * [round(v_OPEX['Offshore Wind'] * 10**6,2)])) # Wind farm day-ahead offer price
     p_W_cap = 200 * wind # Wind farm capacities (MW)
     WT = ['V{0}'.format(v) for v in wind_tech['Profile']]
     chosen_wind_profiles = wind_profiles[WT] # 'Randomly' chosen production profiles for each wind farm
     P_W = {} # Wind production for each hour and each wind farm
     for t, key in enumerate(TIMES):
         P_W[key] = dict(zip(WINDTURBINES, chosen_wind_profiles.iloc[t,:] * p_W_cap))
-    node_W = dict(zip(WINDTURBINES, wind_tech['Node'])) # Wind turbine node placements
+    node_W_ = dict(zip(WINDTURBINES, wind_tech['Node'])) # Wind turbine node placements
     
 
     ## Transmission Line Information
@@ -128,7 +129,7 @@ class Network:
         L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
     else:
         L_cap = dict(zip(LINES, line_info['Capacity']))
-    L_susceptance = dict(zip(LINES, [500 for _ in LINES])) #  Susceptance of transmission line [pu.] 
+    L_susceptance = dict(zip(LINES, 1/line_info['Reactance'])) #  Susceptance of transmission line [pu.] 
     L_from = dict(zip(LINES, line_info['From'])) # Origin node of transmission line
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
     
@@ -149,16 +150,16 @@ class Network:
 
     def __init__(self):
         # Node to unit mappings
-        self.map_g = self._map_units(self.node_G) # Generators
-        self.map_d = self._map_units(self.node_D) # Demands
-        self.map_w = self._map_units(self.node_W) # Wind turbines
+        self.map_g = self._map_units(self.node_G_) # Generators
+        self.map_d = self._map_units(self.node_D_) # Demands
+        self.map_w = self._map_units(self.node_W_) # Wind turbines
         # self.map_b = self._map_units(self.batt_node) # Batteries
         self.map_from = self._map_units(self.L_from) # Transmission lines
         self.map_to = self._map_units(self.L_to) # Transmission lines
         self._map_nodes() # Combination of the two above mappings
-        self.node_W = {key : ["N{0}".format(value)] for key,value in self.node_W.items()}
-        self.node_G = {key : ["N{0}".format(value)] for key,value in self.node_G.items()}
-        self.node_D = {key : ["N{0}".format(value)] for key,value in self.node_D.items()}
+        self.node_W = {key : ["N{0}".format(value)] for key,value in self.node_W_.items()}
+        self.node_G = {key : ["N{0}".format(value)] for key,value in self.node_G_.items()}
+        self.node_D = {key : ["N{0}".format(value)] for key,value in self.node_D_.items()}
         self.node_L_from = dict(zip(self.LINES, ['N{0}'.format(n) for n in self.line_info['From']]))
         self.node_L_to = dict(zip(self.LINES, ['N{0}'.format(n) for n in self.line_info['To']]))
 

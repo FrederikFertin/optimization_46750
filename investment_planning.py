@@ -192,7 +192,6 @@ class InvestmentPlanning(Network):
         self.model.Params.NonConvex = 2
         self.model.update()
 
-
     def run(self):
         self.model.optimize()
         self._save_data()
