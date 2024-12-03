@@ -128,8 +128,8 @@ class Network:
     if wind:
         L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
     else:
-        L_cap = dict(zip(LINES, line_info['Capacity']))
-    L_susceptance = dict(zip(LINES, 1/line_info['Reactance'])) #  Susceptance of transmission line [pu.] 
+        L_cap = dict(zip(LINES, line_info['Capacity_wind']))
+    L_susceptance = dict(zip(LINES, [500]*L))#1/line_info['Reactance'])) #  Susceptance of transmission line [pu.] 
     L_from = dict(zip(LINES, line_info['From'])) # Origin node of transmission line
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
     

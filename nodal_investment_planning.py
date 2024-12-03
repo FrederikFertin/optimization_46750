@@ -41,7 +41,7 @@ class InvestmentPlanning(Network):
         self.carbontax = carbontax # set carbon tax in €/tCO2
         self.BUDGET = budget # set budget for capital costs in M€
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-        self.chosen_days = chosen_days # set chosen days to None
+        self.chosen_days = chosen_days # set chosen days
         self.root_node = 'N1'
 
         self._initialize_fluxes(hours)
