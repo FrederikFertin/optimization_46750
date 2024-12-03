@@ -6,8 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
-
 class expando(object):
     '''
         A small class which can have attributes set
@@ -47,8 +45,6 @@ class nodal_clearing(Network):
         self.nuclear_flux  = np.ones(hours)
         self.onshore_flux  = np.ones(hours)
 
-        
-
     def _initialize_times_and_demands(self, hours, timelimit):
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -82,7 +78,6 @@ class nodal_clearing(Network):
                        'Gas'           : self.gas_flux}
 
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-
 
     def build_model(self):
         self.model = gb.Model(name='Nodal clearing')
@@ -175,7 +170,6 @@ class nodal_clearing(Network):
     def display_results(self):
         print('Actual NPV: \t{0} M€\n'.format(round(self.data.npv,2)))
         
-
     def plot_prices(self):     
         # Plot boxplots of price distribution in each node
         prices = pd.DataFrame(self.data.lambda_)
@@ -183,7 +177,6 @@ class nodal_clearing(Network):
         plt.title('Price distribution at each node')
         plt.ylabel('Price [€/MWh]')
         plt.show()
-
 
 class InvestmentPlanning(Network):
     
@@ -277,7 +270,6 @@ class InvestmentPlanning(Network):
         # Set non-convex objective
         self.model.update()
 
-
     def run(self):
         self.model.setParam('OutputFlag', 0)
         self.model.optimize()
@@ -286,8 +278,8 @@ class InvestmentPlanning(Network):
     def _calculate_capture_prices(self):
         # Calculate capture price
         self.data.capture_prices = {
-            g : {n : (np.sum(np.fromiter((self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float)) /
-                    np.sum(np.fromiter((self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float))) if self.data.investment_values[g][n] > 0 else None
+            g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
+                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None
             for n in self.node_I[g]} for g in self.INVESTMENTS}
 
     def _save_data(self):
