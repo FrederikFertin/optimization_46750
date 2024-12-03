@@ -306,8 +306,6 @@ class InvestmentPlanning(Network):
             print(f"{key}: \t\t{round(value,2)} MW")
             print(f"Capital cost: \t\t{round(value*self.CAPEX[key],2)} M€\n")
 
-
-
 if __name__ == '__main__':
     # Carbon TAX price: https://www.statista.com/statistics/1322214/carbon-prices-european-union-emission-trading-scheme/
     # Carbon TAX price: https://www.eex.com/en/market-data/emission-allowances/eua-auction-results

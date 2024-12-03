@@ -6,8 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
-
 class expando(object):
     '''
         A small class which can have attributes set
@@ -47,8 +45,6 @@ class nodal_clearing(Network):
         self.nuclear_flux  = np.ones(hours)
         self.onshore_flux  = np.ones(hours)
 
-        
-
     def _initialize_times_and_demands(self, hours, timelimit):
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -82,7 +78,6 @@ class nodal_clearing(Network):
                        'Gas'           : self.gas_flux}
 
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-
 
     def build_model(self):
         self.model = gb.Model(name='Nodal clearing')
@@ -156,11 +151,11 @@ class nodal_clearing(Network):
         self.data.l_cap_l_dual = {l : {t : self.constraints.line_l_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
         self.data.l_cap_u_dual = {l : {t : self.constraints.line_u_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
 
-        self.costs = np.sum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.T * np.sum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
+        self.costs = gb.quicksum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
                             for g in self.INVESTMENTS for n in self.node_I[g])
         # Define revenue (sum of generation revenues) [M€]
-        self.revenue = (8760 / self.T / 10**6) * np.sum(self.cf[g] * 
+        self.revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
                                             self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
                                             for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
         
@@ -175,7 +170,6 @@ class nodal_clearing(Network):
     def display_results(self):
         print('Actual NPV: \t{0} M€\n'.format(round(self.data.npv,2)))
         
-
     def plot_prices(self):     
         # Plot boxplots of price distribution in each node
         prices = pd.DataFrame(self.data.lambda_)
@@ -183,7 +177,6 @@ class nodal_clearing(Network):
         plt.title('Price distribution at each node')
         plt.ylabel('Price [€/MWh]')
         plt.show()
-
 
 class InvestmentPlanning(Network):
     
@@ -277,7 +270,6 @@ class InvestmentPlanning(Network):
         # Set non-convex objective
         self.model.update()
 
-
     def run(self):
         self.model.setParam('OutputFlag', 0)
         self.model.optimize()
@@ -286,8 +278,8 @@ class InvestmentPlanning(Network):
     def _calculate_capture_prices(self):
         # Calculate capture price
         self.data.capture_prices = {
-            g : {n : (np.sum(np.fromiter((self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float)) /
-                    np.sum(np.fromiter((self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float))) if self.data.investment_values[g][n] > 0 else None
+            g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
+                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None
             for n in self.node_I[g]} for g in self.INVESTMENTS}
 
     def _save_data(self):
@@ -333,8 +325,8 @@ if __name__ == '__main__':
     nc_org.build_model()
     nc_org.run()
     # nc.plot_prices()
-    price_forcast = nc_org.data.lambda_
-    p_forecast = pd.DataFrame(price_forcast)
+    price_forecast = nc_org.data.lambda_
+    p_forecast = pd.DataFrame(price_forecast)
 
 
 # %%
