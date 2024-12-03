@@ -443,7 +443,7 @@ class InvestmentPlanning(Network):
 
 if __name__ == '__main__':
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=12, budget=450, timelimit=200, carbontax=50, seed=38)
+    ip = InvestmentPlanning(hours=12, budget=450, timelimit=300, carbontax=50, seed=38)
     # Build model
     ip.build_model()
     # Run optimization
