@@ -53,7 +53,6 @@ def createNetwork(mapping_gen, mapping_loads, mapping_wind):
     
     return net
 
-
 def drawNormal(net):
     """ Draws the network with buses, lines, generators, loads and wind turbines. """
     
@@ -72,7 +71,6 @@ def drawNormal(net):
     plt.title("Network", fontsize=30)
     plt.legend()
     plt.show()
-
 
 def drawLMP(net, lambda_, loading: dict | None = None):
     """ Draws the network with the LMPs of each bus as a color gradient.

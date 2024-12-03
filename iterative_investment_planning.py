@@ -3,14 +3,8 @@ import gurobipy as gb
 from network import Network
 from gurobipy import GRB
 import numpy as np
-import random
 import pandas as pd
-import pandapower as pp
-import pandapower.plotting as plot
 import matplotlib.pyplot as plt
-import os
-from matplotlib.lines import Line2D
-
 
 class expando(object):
     '''
@@ -51,8 +45,6 @@ class nodal_clearing(Network):
         self.nuclear_flux  = np.ones(hours)
         self.onshore_flux  = np.ones(hours)
 
-        
-
     def _initialize_times_and_demands(self, hours, timelimit):
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -87,7 +79,6 @@ class nodal_clearing(Network):
 
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
 
-
     def build_model(self):
         self.model = gb.Model(name='Nodal clearing')
 
@@ -97,7 +88,7 @@ class nodal_clearing(Network):
         """ Initialize variables """
         self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY, name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.theta        = {n: {t:       self.model.addVar(lb=-np.pi,        ub=np.pi,        name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
+        self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
         self.variables.flow         = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         """ Initialize objective function """
@@ -136,11 +127,7 @@ class nodal_clearing(Network):
         # Reference voltage angle:
         self.constraints.ref_angle  = self.model.addConstrs((  self.variables.theta[self.root_node][t] == 0
                                                             for t in self.TIMES), name = "ref_angle")
-        self.constraints.angle_u    = self.model.addConstrs((  self.variables.theta[n][t] <= np.pi
-                                                            for n in self.NODES for t in self.TIMES), name = "angle_upper_limit") # Can these limits be imposed in the definition of the variable?
-        self.constraints.angle_l    = self.model.addConstrs((- self.variables.theta[n][t] <= np.pi
-                                                            for n in self.NODES for t in self.TIMES), name = "angle_lower_limit")
-
+        
         self.model.update()
 
     def _save_data(self):
@@ -164,11 +151,11 @@ class nodal_clearing(Network):
         self.data.l_cap_l_dual = {l : {t : self.constraints.line_l_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
         self.data.l_cap_u_dual = {l : {t : self.constraints.line_u_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
 
-        self.costs = np.sum(np.fromiter((self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.T * np.sum(np.fromiter((self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float))
-                            for g in self.INVESTMENTS for n in self.node_I[g]), float))
+        self.costs = sum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * sum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
+                            for g in self.INVESTMENTS for n in self.node_I[g])
         # Define revenue (sum of generation revenues) [M€]
-        self.revenue = (8760 / self.T / 10**6) * np.sum(np.fromiter((self.cf[g] * 
+        self.revenue = (8760 / self.T / 10**6) * sum(self.cf[g] * 
                                             self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
                                             for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g]), float))
         
@@ -183,7 +170,6 @@ class nodal_clearing(Network):
     def display_results(self):
         print('Actual NPV: \t{0} M€\n'.format(round(self.data.npv,2)))
         
-
     def plot_prices(self):     
         # Plot boxplots of price distribution in each node
         prices = pd.DataFrame(self.data.lambda_)
@@ -192,10 +178,9 @@ class nodal_clearing(Network):
         plt.ylabel('Price [€/MWh]')
         plt.show()
 
-
 class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42, lmd:dict = None): # initialize class
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42, lmd:dict = None, invest_bound:float = GRB.INFINITY): # initialize class
         super().__init__()
 
         np.random.seed(seed)
@@ -214,6 +199,7 @@ class InvestmentPlanning(Network):
         self.onshore_flux = np.ones(hours)
         self.carbontax = carbontax
         self.chosen_days = None
+        self.invest_bound = invest_bound
 
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -250,7 +236,7 @@ class InvestmentPlanning(Network):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=self.invest_bound, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.model.update()
 
@@ -285,7 +271,6 @@ class InvestmentPlanning(Network):
         # Set non-convex objective
         self.model.update()
 
-
     def run(self):
         self.model.setParam('OutputFlag', 0)
         self.model.optimize()
@@ -294,8 +279,8 @@ class InvestmentPlanning(Network):
     def _calculate_capture_prices(self):
         # Calculate capture price
         self.data.capture_prices = {
-            g : {n : (np.sum(np.fromiter((self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float)) /
-                    np.sum(np.fromiter((self.data.investment_dispatch_values[g][n][t] for t in self.TIMES), float))) if self.data.investment_values[g][n] > 0 else None
+            g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
+                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None
             for n in self.node_I[g]} for g in self.INVESTMENTS}
 
     def _save_data(self):
@@ -329,7 +314,7 @@ class InvestmentPlanning(Network):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 90*24
+    hours = 10*24
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -340,35 +325,35 @@ if __name__ == '__main__':
     nc_org = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
     nc_org.build_model()
     nc_org.run()
-    price_forcast = nc_org.data.lambda_
-    p_forecast = pd.DataFrame(price_forcast)
+    # nc.plot_prices()
+    price_forecast = nc_org.data.lambda_
+    p_forecast = pd.DataFrame(price_forecast)
 
 
 # %%
-budgets = np.logspace(0, 3, 28)
-for budget in budgets: 
-    ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
-    ip.build_model()
-    ip.run()
-    ip.display_results()
-    investments=ip.data.investment_values
-    expected_NPV.append(ip.data.objective_value)
+    budgets = np.linspace(0, 2000, 5)
+    for budget in budgets:
+        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast)
+        ip.build_model()
+        ip.run()
+        ip.display_results()
+        investments=ip.data.investment_values
+        expected_NPV.append(ip.data.objective_value)
 
-    # Create nodal clearing instance with new investments
-    nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
-    nc.build_model()
-    nc.run()
-    nc.display_results()
-    actual_NPV.append(nc.data.npv)
+        # Create nodal clearing instance with new investments
+        nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
+        nc.build_model()
+        nc.run()
+        nc.display_results()
+        actual_NPV.append(nc.data.npv)
 
-
-#%%
-plt.plot(budgets, expected_NPV, marker='o', label='Expected NPV')
-plt.plot(budgets, actual_NPV, marker = 'd', label='Actual NPV')
-# plt.xscale('log')
-plt.xlabel('Budget [M€]')
-# plt.yscale('log')
-plt.ylabel('NPV [M€]')
-plt.legend()
-plt.show()
+    # %%
+    plt.plot(budgets, expected_NPV, label='Expected NPV')
+    plt.plot(budgets, actual_NPV, label='Actual NPV')
+    # plt.xscale('log')
+    plt.xlabel('Budget [M€]')
+    # plt.yscale('log')
+    plt.ylabel('NPV [M€]')
+    plt.legend()
+    plt.show()
 # %%
