@@ -151,11 +151,11 @@ class nodal_clearing(Network):
         self.data.l_cap_l_dual = {l : {t : self.constraints.line_l_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
         self.data.l_cap_u_dual = {l : {t : self.constraints.line_u_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
 
-        self.costs = gb.quicksum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
+        self.costs = sum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * sum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
                             for g in self.INVESTMENTS for n in self.node_I[g])
         # Define revenue (sum of generation revenues) [M€]
-        self.revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
+        self.revenue = (8760 / self.T / 10**6) * sum(self.cf[g] * 
                                             self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
                                             for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
         
@@ -199,6 +199,7 @@ class InvestmentPlanning(Network):
         self.onshore_flux = np.ones(hours)
         self.carbontax = carbontax
         self.chosen_days = None
+        self.invest_bound = invest_bound
 
         if hours >= 24:
             assert hours % 24 == 0, "Hours must be a multiple of 24"
@@ -235,7 +236,7 @@ class InvestmentPlanning(Network):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=invest_bound, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=self.invest_bound, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.model.update()
 
@@ -313,7 +314,7 @@ class InvestmentPlanning(Network):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 90*24
+    hours = 10*24
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -330,9 +331,9 @@ if __name__ == '__main__':
 
 
 # %%
-    budgets = np.linspace(0, 2000, 20)
+    budgets = np.linspace(0, 2000, 5)
     for budget in budgets:
-        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
+        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast)
         ip.build_model()
         ip.run()
         ip.display_results()
