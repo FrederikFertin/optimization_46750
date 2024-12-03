@@ -187,7 +187,7 @@ class nodal_clearing(Network):
 
 class InvestmentPlanning(Network):
     
-    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42, lmd:dict = None): # initialize class
+    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42, lmd:dict = None, invest_bound:float = GRB.INFINITY): # initialize class
         super().__init__()
 
         np.random.seed(seed)
@@ -242,7 +242,7 @@ class InvestmentPlanning(Network):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=invest_bound, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.model.update()
 
@@ -321,7 +321,7 @@ class InvestmentPlanning(Network):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 180*24
+    hours = 90*24
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -338,7 +338,8 @@ if __name__ == '__main__':
 
 
 # %%
-    for budget in np.logspace(0, 4, 10):
+    budgets = np.linspace(0, 2000, 20)
+    for budget in budgets:
         ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
         ip.build_model()
         ip.run()
@@ -354,11 +355,11 @@ if __name__ == '__main__':
         actual_NPV.append(nc.data.npv)
 
     # %%
-    plt.plot(np.logspace(0, 4, 5), expected_NPV, label='Expected NPV')
-    plt.plot(np.logspace(0, 4, 5), actual_NPV, label='Actual NPV')
-    plt.xscale('log')
+    plt.plot(budgets, expected_NPV, label='Expected NPV')
+    plt.plot(budgets, actual_NPV, label='Actual NPV')
+    # plt.xscale('log')
     plt.xlabel('Budget [M€]')
-    plt.yscale('log')
+    # plt.yscale('log')
     plt.ylabel('NPV [M€]')
     plt.legend()
     plt.show()
