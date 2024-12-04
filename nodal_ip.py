@@ -250,7 +250,8 @@ class BilevelNodalIP(Network, CommonMethods):
         """ Initialize variables """
         # Investment in generation technologies (in MW)
         self.variables.P_investment = {i : {n : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in tech {0} at node {1}'.format(i, n)) for n in self.node_I[i]} for i in self.INVESTMENTS}
-        
+        self.variables.npv = self.model.addVar(lb=self.min_npv, ub=self.max_npv, name='NPV')
+
         # Get lower level variables
         if self.bounded:
             self._add_lower_level_variables_bounded()
@@ -269,13 +270,10 @@ class BilevelNodalIP(Network, CommonMethods):
                                             for i in self.INVESTMENTS for t in self.TIMES for n in self.node_I[i])
         
         # Define NPV
-        self.npv = self.revenue - self.costs
+        self.model.addConstr(self.variables.npv == self.revenue - self.costs)
 
-        self.model.addConstr(self.npv<=self.max_npv, name='npv_upper_estimate')
-        self.model.addConstr(self.npv>=self.min_npv, name='npv_lower_estimate')
-
-        # Set objective
-        self.model.setObjective(self.npv, gb.GRB.MAXIMIZE)
+        # Set objective to maximize NPV
+        self.model.setObjective(self.variables.npv, gb.GRB.MAXIMIZE)
 
         self.model.update()
 
@@ -305,40 +303,62 @@ class BilevelNodalIP(Network, CommonMethods):
                                     for i in self.INVESTMENTS}
 
     def _save_data(self):
-        # Save objective value
-        self.data.objective_value = self.model.ObjVal
+        solution = False # Whether a solution was found
+        if self.model.status == GRB.Status.OPTIMAL:
+            self.data.status = 'Optimal'
+            solution = True
+        # Check if a solution was found
+        elif self.model.status == GRB.Status.INFEASIBLE:
+            self.data.status = 'Infeasible'
+        elif self.model.status == GRB.Status.TIME_LIMIT:
+            self.data.status = 'Time limit reached'
+            if self.model.SolCount > 0:
+                solution = True
+        elif self.model.status == GRB.Status.UNBOUNDED:
+            self.data.status = 'Unbounded'
+        else:
+            self.data.status = 'Other'
+            if self.model.SolCount > 0:
+                solution = True
         
-        # Save investment values
-        self.data.investment_values = {i : {n : round(self.variables.P_investment[i][n].x, 3) for n in self.node_I[i]} for i in self.INVESTMENTS}
-        self.data.capacities = {t :
-                                {**{i : {n: round(self.data.investment_values[i][n]*self.fluxes[i][t]*self.cf[i], 3) for n in self.node_I[i]} for i in self.INVESTMENTS},
-                                **{g : {n: self.P_G_max[g] for n in self.node_G[g]} for g in self.GENERATORS},
-                                **{w : {n: self.P_W[t][w] for n in self.node_W[w]} for w in self.WINDTURBINES}}
-                                for t in self.TIMES}
-        
-        # Save generation dispatch values
-        self.data.investment_dispatch_values = {t : {i : {n : round(self.variables.p_g[i][n][t].x, 3) for n in self.node_I[i]} for i in self.INVESTMENTS} for t in self.TIMES}
-        self.data.generator_dispatch_values = {t : {g : {n : round(self.variables.p_g[g][n][t].x, 3) for n in self.node_G[g]} for g in self.GENERATORS} for t in self.TIMES}
-        self.data.windturbine_dispatch_values = {t : {w : {n : round(self.variables.p_g[w][n][t].x, 3) for n in self.node_W[w]} for w in self.WINDTURBINES} for t in self.TIMES}
-        self.data.all_dispatch_values = {t : {g : {n : round(self.variables.p_g[g][n][t].x, 3) for n in self.node_production[g]} for g in self.PRODUCTION_UNITS} for t in self.TIMES}
-        
-        # Save demand dispatch values
-        self.data.demand_dispatch_values = {t : {d: {n : round(self.variables.p_d[d][n][t].x, 3) for n in self.node_D[d]} for d in self.DEMANDS} for t in self.TIMES}
+        if solution:
+            # Save objective value
+            self.data.objective_value = self.model.ObjVal
+            
+            # Save investment values
+            self.data.investment_values = {i : {n : round(self.variables.P_investment[i][n].x, 3) for n in self.node_I[i]} for i in self.INVESTMENTS}
+            self.data.capacities = {t :
+                                    {**{i : {n: round(self.data.investment_values[i][n]*self.fluxes[i][t]*self.cf[i], 3) for n in self.node_I[i]} for i in self.INVESTMENTS},
+                                    **{g : {n: self.P_G_max[g] for n in self.node_G[g]} for g in self.GENERATORS},
+                                    **{w : {n: self.P_W[t][w] for n in self.node_W[w]} for w in self.WINDTURBINES}}
+                                    for t in self.TIMES}
+            
+            # Save generation dispatch values
+            self.data.investment_dispatch_values = {t : {i : {n : round(self.variables.p_g[i][n][t].x, 3) for n in self.node_I[i]} for i in self.INVESTMENTS} for t in self.TIMES}
+            self.data.generator_dispatch_values = {t : {g : {n : round(self.variables.p_g[g][n][t].x, 3) for n in self.node_G[g]} for g in self.GENERATORS} for t in self.TIMES}
+            self.data.windturbine_dispatch_values = {t : {w : {n : round(self.variables.p_g[w][n][t].x, 3) for n in self.node_W[w]} for w in self.WINDTURBINES} for t in self.TIMES}
+            self.data.all_dispatch_values = {t : {g : {n : round(self.variables.p_g[g][n][t].x, 3) for n in self.node_production[g]} for g in self.PRODUCTION_UNITS} for t in self.TIMES}
+            
+            # Save demand dispatch values
+            self.data.demand_dispatch_values = {t : {d: {n : round(self.variables.p_d[d][n][t].x, 3) for n in self.node_D[d]} for d in self.DEMANDS} for t in self.TIMES}
 
-        # Save uniform prices lambda
-        self.data.lambda_ = {n : {t : round(self.variables.lmd[n][t].x, 3) for t in self.TIMES} for n in self.NODES}
+            # Save uniform prices lambda
+            self.data.lambda_ = {n : {t : round(self.variables.lmd[n][t].x, 3) for t in self.TIMES} for n in self.NODES}
 
-        # Save voltage angles
-        self.data.theta = {n : {t : round(self.variables.theta[n][t].x, 3) for t in self.TIMES} for n in self.NODES}
+            # Save voltage angles
+            self.data.theta = {n : {t : round(self.variables.theta[n][t].x, 3) for t in self.TIMES} for n in self.NODES}
 
-        self.data.xi = {l : {t: round(ip.variables.xi[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+            self.data.xi = {l : {t: round(ip.variables.xi[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
 
-        self.data.rho_over = {l : {t: round(ip.variables.rho_over[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
-        self.data.rho_under = {l : {t: round(ip.variables.rho_under[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+            self.data.rho_over = {l : {t: round(ip.variables.rho_over[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+            self.data.rho_under = {l : {t: round(ip.variables.rho_under[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
 
-        self.data.flow = {l : {t: round(ip.variables.flow[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+            self.data.flow = {l : {t: round(ip.variables.flow[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
 
-        self._calculate_capture_prices()
+            self._calculate_capture_prices()
+        else:
+            print('No solution found.')
+            print('Status: {0}'.format(self.data.status))
 
     def run(self):
         self.model.optimize()
@@ -527,7 +547,7 @@ class BilevelNodalIP(Network, CommonMethods):
 if __name__ == '__main__':
     # Initialize investment planning model
     seed = 38
-    timelimit = 600
+    timelimit = 3600*10
     budget = 10000
     carbontax = 60
 
@@ -537,55 +557,69 @@ if __name__ == '__main__':
     chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
     
     ## Initialization of small model for testing:
-    n_hours = 2
-    first_hour = 19
-    chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
+    runtimes = {}
+    gb_runtimes = {}
+    for n_hours in [5, 24]:
+        runtimes[str(n_hours)] = {}
+        gb_runtimes[str(n_hours)] = {}
+        for scen in [4]:
+            first_hour = 19
+            chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
 
-    t_start = time.time()
-    
-    bounded = True
-    price_ub = None
-    price_lb = None
-    min_npv = 0
-    max_npv = GRB.INFINITY
+            t_start = time.time()
+            
+            model_options = {'bounds': 1,
+                            'price_ub': 2,
+                            'max_npv': 3,
+                            'min_npv': 4,}
 
-    if False: # Whether we include upper bounds for lambda in the investment planning model
-        nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours)
-        nc_org.build_model()
-        nc_org.run()
-        price_ub        = nc_org.data.lambda_
-        if False: # Whether we include an upper bound for NPV in the investment planning model
-            n_ip = NodalIP(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd_ub=price_ub)
-            n_ip.build_model()
-            n_ip.run()
-            investments     = n_ip.data.investment_values
-            max_npv         = n_ip.data.objective_value
-            if False: # Whether we include a lower bound for NPV in the investment planning model
-                nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours, P_investment=investments)
+            bounded = model_options['bounds'] <= scen
+            price_ub = None
+            price_lb = None
+            min_npv = 0
+            max_npv = GRB.INFINITY
+
+            if model_options['price_ub'] <= scen: # Whether we include upper bounds for lambda in the investment planning model
+                nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours)
                 nc_org.build_model()
                 nc_org.run()
-                min_npv         = n_ip.data.npv
-                price_lb        = nc_org.data.lambda_
+                price_ub        = nc_org.data.lambda_
+                if model_options['max_npv'] <= scen: # Whether we include an upper bound for NPV in the investment planning model
+                    n_ip = NodalIP(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_ub)
+                    n_ip.build_model()
+                    n_ip.run()
+                    investments     = n_ip.data.investment_values
+                    max_npv         = n_ip.data.objective_value
+                    if model_options['min_npv'] <= scen: # Whether we include a lower bound for NPV in the investment planning model
+                        nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours, P_investment=investments)
+                        nc_org.build_model()
+                        nc_org.run()
+                        min_npv         = nc_org.data.npv
+                        #price_lb        = nc_org.data.lambda_ # Does not work as intended
 
-    ip = BilevelNodalIP(chosen_hours=chosen_hours,
-                        budget=budget,
-                        timelimit=timelimit,
-                        carbontax=carbontax,
-                        seed=seed,
-                        lmd_ub=price_ub,
-                        lmd_lb=price_lb,
-                        max_npv=max_npv,
-                        min_npv=min_npv,
-                        bounded=bounded,
-                        )
-    ip.build_model()
-    ip.run()
-    t_end = time.time()
-    runtime = t_end - t_start
+            ip = BilevelNodalIP(chosen_hours=chosen_hours,
+                                budget=budget,
+                                timelimit=timelimit,
+                                carbontax=carbontax,
+                                seed=seed,
+                                lmd_ub=price_ub,
+                                lmd_lb=price_lb,
+                                max_npv=max_npv,
+                                min_npv=min_npv,
+                                bounded=bounded,
+                                )
+            ip.build_model()
+            ip.run()
+            t_end = time.time()
+            runtime = t_end - t_start
+            runtimes[str(n_hours)][str(scen)] = round(runtime,2)
+            gb_runtimes[str(n_hours)][str(scen)] = round(ip.model.Runtime,2)
 
-    # Display results
-    ip.display_results()
-    print('Runtime: {0} seconds'.format(round(runtime,2)))
+            # Display results
+            ip.display_results()
+            print('Runtime: {0} seconds'.format(round(runtime,2)))
+    print(runtimes)
+    print(gb_runtimes)
     print()
     
     #ip.plot_network()

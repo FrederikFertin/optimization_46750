@@ -134,7 +134,7 @@ class NodalClearing(Network, CommonMethods):
         self.data.npv = self.revenue - self.costs
 
     def run(self):
-        #self.model.setParam('OutputFlag', 0)
+        self.model.setParam('OutputFlag', 0)
         self.model.optimize()
         self._save_data()
     
