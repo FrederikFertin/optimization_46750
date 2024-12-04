@@ -26,8 +26,11 @@ class Network:
 
     # Production profiles for wind and solar
     offshore_hourly_2019 = pd.read_csv(cwd + '/data/offshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
+    offshore_flux_dict = dict(zip(['T{0}'.format(int(key)+1) for key in offshore_hourly_2019.index], offshore_hourly_2019))
     onshore_hourly_2019 = pd.read_csv(cwd + '/data/onshore_hourly_2019.csv', skiprows=3)['electricity'] # Wind production profiles for a 1 MW wind farm [pu]
+    onshore_flux_dict = dict(zip(['T{0}'.format(int(key)+1) for key in onshore_hourly_2019.index], onshore_hourly_2019))
     solar_hourly_2019 = pd.read_csv(cwd + '/data/pv_hourly_2019.csv', skiprows=3)['electricity'] # Solar production profiles for a 1 MW solar farm [pu]
+    solar_flux_dict = dict(zip(['T{0}'.format(int(key)+1) for key in solar_hourly_2019.index], solar_hourly_2019))
     offshore_cf = sum(offshore_hourly_2019) / len(offshore_hourly_2019) # Offshore capacity factor
     onshore_cf = sum(onshore_hourly_2019) / len(onshore_hourly_2019) # Onshore capacity factor
     solar_cf = sum(solar_hourly_2019) / len(solar_hourly_2019) # Solar capacity factor
@@ -37,6 +40,7 @@ class Network:
     demand_flux = pd.read_excel(cwd + '/data/load2023.xlsx').iloc[1:, :]
     demand_hourly = demand_flux[['Unnamed: 2']]
     demand_hourly.columns = ['Demand']
+    demand_dict = dict(zip(['T{0}'.format(int(key)) for key in demand_hourly.index], demand_hourly['Demand']))
 
     ## Number of each type of unit/identity
     G = np.shape(gen_tech)[0] # Number of generators
@@ -128,8 +132,8 @@ class Network:
     if wind:
         L_cap = dict(zip(LINES, line_info['Capacity_wind'])) # Capacity of transmission line [MVA]
     else:
-        L_cap = dict(zip(LINES, line_info['Capacity_wind']))
-    L_susceptance = dict(zip(LINES, [500]*L))#1/line_info['Reactance'])) #  Susceptance of transmission line [pu.] 
+        L_cap = dict(zip(LINES, line_info['Capacity']))
+    L_susceptance = dict(zip(LINES, [500]*L))#1/line_info['Reactance']))# [500]*L))# #  Susceptance of transmission line [pu.] 
     L_from = dict(zip(LINES, line_info['From'])) # Origin node of transmission line
     L_to = dict(zip(LINES, line_info['To'])) # Destination node of transmission line
     
