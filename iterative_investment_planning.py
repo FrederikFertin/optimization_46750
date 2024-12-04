@@ -263,7 +263,7 @@ class InvestmentPlanning(Network, CommonMethods):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 10*24
+    hours = 365*24
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -274,15 +274,15 @@ if __name__ == '__main__':
     nc_org = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
     nc_org.build_model()
     nc_org.run()
-    # nc.plot_prices()
+    nc_org.plot_prices()
     price_forecast = nc_org.data.lambda_
     p_forecast = pd.DataFrame(price_forecast)
 
 
 # %%
-    budgets = np.log(np.linspace(1, 2000, 20))
+    budgets = np.linspace(0, 2000, 21)
     for budget in budgets:
-        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast)
+        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=100)
         ip.build_model()
         ip.run()
         ip.display_results()
@@ -297,9 +297,9 @@ if __name__ == '__main__':
         actual_NPV.append(nc.data.npv)
 
     # %%
-    plt.plot(budgets, expected_NPV, label='Expected NPV')
-    plt.plot(budgets, actual_NPV, label='Actual NPV')
-    plt.xscale('log')
+    plt.plot(budgets, expected_NPV, marker = 'o', label='Expected NPV')
+    plt.plot(budgets, actual_NPV, marker = 'd', label='Actual NPV')
+    # plt.xscale('log')
     plt.xlabel('Budget [M€]')
     # plt.yscale('log')
     plt.ylabel('NPV [M€]')
