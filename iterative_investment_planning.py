@@ -174,9 +174,9 @@ class InvestmentPlanning(Network, CommonMethods):
         self.carbontax = carbontax # set carbon tax in €/tCO2
         self.BUDGET = budget # set budget for capital costs in M€
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-        self.root_node = 'N1'
-        self.lmd = lmd
-        self.invest_bound = invest_bound
+        self.root_node = 'N1' # set root node for voltage angle reference
+        self.lmd = lmd # set price forecast based on nodal clearing
+        self.invest_bound = invest_bound # set upper bound for investment capacity
 
         self._initialize_fluxes_demands()
         self._initialize_costs()

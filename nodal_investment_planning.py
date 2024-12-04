@@ -90,10 +90,10 @@ class InvestmentPlanning(Network, CommonMethods):
         self.variables.nu           = {t:           self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
         self.variables.lmd          = {n: {t:       self.model.addVar(lb=0,             ub=(self.lmd_ub[n][t] if self.lmd_ub else max(self.U_D)),    name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
         self.variables.xi           = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='Dual for line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
-        self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,             ub=self.C_offer[g], name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.mu_over      = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
         self.variables.sigma_under  = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.sigma_over   = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.sigma_over   = {d: {n: {t:   self.model.addVar(lb=0,             ub=self.U_D[d],     name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
         self.variables.rho_over     = {l: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
         self.variables.rho_under    = {l: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
@@ -104,7 +104,7 @@ class InvestmentPlanning(Network, CommonMethods):
         self.variables.b4           = {d: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b4_{0}_{1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
         self.variables.b5           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b5_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
         self.variables.b6           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b6_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
-
+        
     def _add_primal_lower_level_constraints(self):
         """ Constraint ensuring value of flow is DC-OPF related to voltage angles """
         self.constraints.flow       = self.model.addConstrs((self.variables.flow[l][t] == self.L_susceptance[l] * (self.variables.theta[self.node_L_from[l]][t] - self.variables.theta[self.node_L_to[l]][t])
