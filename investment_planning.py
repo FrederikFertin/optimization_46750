@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from common_methods import CommonMethods
 
 sns.set_style("whitegrid")
 sns.set_palette("colorblind")
@@ -15,9 +16,15 @@ class expando(object):
     '''
     pass
 
-class InvestmentPlanning(Network):
+class InvestmentPlanning(Network, CommonMethods):
     
-    def __init__(self, hours:int = 24, budget:float = 100, timelimit:float=100, carbontax:float=50, seed:int=42): # initialize class
+    def __init__(self,
+                 chosen_hours:list[str] = ['T1', 'T2', 'T3', 'T4', 'T5',],
+                 budget:float = 100,
+                 timelimit:float = 100,
+                 carbontax:float = 50,
+                 seed:int = 42,
+                 ): # initialize class
         super().__init__()
 
         np.random.seed(seed)
@@ -27,49 +34,14 @@ class InvestmentPlanning(Network):
         self.constraints = expando() # build constraint attributes
         self.results = expando() # build results attributes
         
-        self.T = hours
-        self.offshore_flux = np.ones(hours)
-        self.solar_flux = np.ones(hours)
-        self.gas_flux = np.ones(hours)
-        self.nuclear_flux = np.ones(hours)
-        self.onshore_flux = np.ones(hours)
-        self.carbontax = carbontax
-        self.chosen_days = None
-
-        if hours >= 24:
-            assert hours % 24 == 0, "Hours must be a multiple of 24"
-            days = hours // 24
-            self.chosen_days = np.random.choice(range(365), days, replace=False)
-            self.cf = {g: 1 for g in self.INVESTMENTS} # If typical days are used, set capacity factors to 1.
-
-            self.offshore_flux = np.concatenate([self.offshore_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
-            self.solar_flux = np.concatenate([self.solar_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
-            self.onshore_flux = np.concatenate([self.onshore_hourly_2019[d*24: (d+1)*24].values for d in self.chosen_days])
-            self.demand_profiles = np.concatenate([self.demand_hourly.iloc[d*24: (d+1)*24]['Demand'].values for d in self.chosen_days])
-            self.TIMES = ['T{0}'.format(t) for t in range(1, days*24+1)]
-            self.P_D = {} # Distribution of system demands
-            for t, key in enumerate(self.TIMES):
-                self.P_D[key] = dict(zip(self.DEMANDS, self.load_info['load_percent']/100 * self.demand_profiles[t]))
-            #self.HOURS = ['T{0}'.format(t) for t in range(1, 24+1)]*days
-        else:
-            self.TIMES = ['T{0}'.format(t) for t in range(1, hours+1)]
-            #self.HOURS = self.TIMES
-
-        # Establish fluxes (primarily capping generation capacities of renewables)
-        self.fluxes = {'Onshore Wind': self.onshore_flux,
-                       'Offshore Wind': self.offshore_flux,
-                       'Solar': self.solar_flux,
-                       'Nuclear': self.nuclear_flux,
-                       'Gas': self.gas_flux}
-        
-        # Define generation costs
-        self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
-        self.C_G_offer = {g: self.C_G_offer[g] + (self.EF[g]*self.carbontax) for g in self.GENERATORS} # Variable costs in €/MWh incl. carbon tax
-        self.C_I_offer = {g: self.v_OPEX[g] * 10**6 for g in self.INVESTMENTS} # Variable costs in €/MWh
-        self.C_offer = {**self.C_G_offer, **self.C_I_offer, **self.C_W_offer} # Indexed by PRODUCTION_UNITS
-
+        self.chosen_hours = chosen_hours
+        self.T = len(chosen_hours) # set number of hours in optimization
+        self.carbontax = carbontax # set carbon tax in €/tCO2
         self.BUDGET = budget # set budget for capital costs in M€
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
+        
+        self._initialize_fluxes_demands()
+        self._initialize_costs()
 
     def _add_lower_level_variables(self):
         # Define variables of lower level KKTs
@@ -89,19 +61,17 @@ class InvestmentPlanning(Network):
         self.variables.x = {d: {t: self.model.addVar(vtype=gb.GRB.BINARY, name='x_{0}_{1}'.format(d, t)) for t in self.TIMES} for d in self.DEMANDS}
     
     def _add_lower_level_constraints(self):
-        M = max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
+        M = 10*max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
         
         # KKT for lagrange objective derived wrt. generation variables
-        self.constraints.gen_lagrange   = self.model.addConstrs((self.C_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "derived_lagrange_generators")
-        #self.constraints.gen_lagrange_generators   = self.model.addConstrs((self.C_G_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.GENERATORS for t in self.TIMES), name = "derived_lagrange_generators")
-        #self.constraints.gen_lagrange_windturbines = self.model.addConstrs((self.C_W_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.WINDTURBINES for t in self.TIMES), name = "derived_lagrange_windturbines")
-        #self.constraints.gen_lagrange_investments  = self.model.addConstrs((self.C_I_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t in self.TIMES), name = "derived_lagrange_investments")
+        self.constraints.gen_lagrange   = self.model.addConstrs((self.C_offer[g] - self.variables.lmd[t] - self.variables.mu_under[g][t] + self.variables.mu_over[g][t] == 0
+                                                                 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "derived_lagrange_generators")
         
         # KKT for lagrange objective derived wrt. demand variables
-        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
+        self.constraints.dem_lagrange = self.model.addConstrs((-self.U_D[d] + self.variables.lmd[t] - self.variables.sigma_under[d][t] + self.variables.sigma_over[d][t] == 0
+                                                               for d in self.DEMANDS for t in self.TIMES), name = "derived_lagrange_demand")
         
         # KKT for generation minimal production. Bi-linear are replaced by linearized constraints
-        # self.constraints.gen_under = self.model.addConstrs((-self.variables.p_g[g][t] * self.variables.mu_under[g][t] == 0 for g in self.PRODUCTION_UNITS for t in self.TIMES), name = "gen_under")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_under_1")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * self.P_W[g] for g in self.WINDTURBINES for t in self.TIMES), name = "gen_under_1")
         self.constraints.gen_under_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.z[g][t] * M for g in self.INVESTMENTS for t in self.TIMES), name = "gen_under_1")
@@ -119,27 +89,21 @@ class InvestmentPlanning(Network):
         self.constraints.gen_upper_windturbines_3 = self.model.addConstrs((self.variables.mu_over[g][t] <= M * (1 - self.variables.q[g][t]) for g in self.WINDTURBINES for t in self.TIMES), name = "gen_upper_windturbines_3")
 
         # self.constraints.gen_upper_investments = self.model.addConstrs(((self.variables.p_g[g][t] - self.variables.P_investment[g] * self.fluxes[g][t_ix]) * self.variables.mu_over[g][t] == 0 for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments")
-        self.constraints.gen_upper_investments_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] + M * self.variables.q[g][t] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_1")
-        self.constraints.gen_upper_investments_2 = self.model.addConstrs((self.variables.P_investment[g] * self.fluxes[g][t_ix] - M * self.variables.q[g][t] <= self.variables.p_g[g][t] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_upper_investments_2")
+        self.constraints.gen_upper_investments_1 = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t] * self.cf[g] + M * self.variables.q[g][t] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_1")
+        self.constraints.gen_upper_investments_2 = self.model.addConstrs((self.variables.P_investment[g] * self.fluxes[g][t] * self.cf[g] - M * self.variables.q[g][t] <= self.variables.p_g[g][t] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_2")
         self.constraints.gen_upper_investments_3 = self.model.addConstrs((self.variables.mu_over[g][t] <= M * (1 - self.variables.q[g][t]) for g in self.INVESTMENTS for t in self.TIMES), name = "gen_upper_investments_3")
 
         # KKT for demand constraints. Bi-linear are replaced by linearized constraints
-        # self.constraints.dem_under = self.model.addConstrs((-self.variables.p_d[d][t] * self.variables.sigma_under[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_under_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.variables.y[d][t] * M for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         self.constraints.dem_under_2 = self.model.addConstrs((self.variables.sigma_under[d][t] <= M * (1 - self.variables.y[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_under")
         
-        
-        # Redundant constraints
-        # self.constraints.dem_upper = self.model.addConstrs(((self.variables.p_d[d][t] - self.P_D[t][d]) * self.variables.sigma_over[d][t] == 0 for d in self.DEMANDS for t in self.TIMES), name = "dem_upper")
-        # self.constraints.dem_upper_1 = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] + M * self.variables.x[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_1")
-        self.constraints.dem_upper_2 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.x[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
-        self.constraints.dem_upper_3 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.x[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
-        
+        self.constraints.dem_upper_1 = self.model.addConstrs((self.P_D[t][d] - M * self.variables.x[d][t] <= self.variables.p_d[d][t] for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_3")
+        self.constraints.dem_upper_2 = self.model.addConstrs((self.variables.sigma_over[d][t] <= M * (1 - self.variables.x[d][t]) for d in self.DEMANDS for t in self.TIMES), name = "dem_upper_2")
         
         # Generation capacity limits
         self.constraints.gen_cap_generators   = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_G_max[g] for g in self.GENERATORS for t in self.TIMES), name = "gen_cap_generators")
         self.constraints.gen_cap_windturbines = self.model.addConstrs((self.variables.p_g[g][t] <= self.P_W[t][g] for g in self.WINDTURBINES for t in self.TIMES), name = "gen_cap_windturbines")
-        self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t_ix] for g in self.INVESTMENTS for t_ix, t in enumerate(self.TIMES)), name = "gen_cap_investments")
+        self.constraints.gen_cap_investments  = self.model.addConstrs((self.variables.p_g[g][t] <= self.variables.P_investment[g] * self.fluxes[g][t] * self.cf[g] for g in self.INVESTMENTS for t in self.TIMES), name = "gen_cap_investments")
         
         # Demand magnitude constraints
         self.constraints.dem_mag = self.model.addConstrs((self.variables.p_d[d][t] <= self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES), name = "dem_mag")
@@ -168,8 +132,7 @@ class InvestmentPlanning(Network):
                             + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.variables.p_g[g][t] for t in self.TIMES)
                             for g in self.INVESTMENTS)
         # Define revenue (sum of generation revenues) [M€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
-                                            self.variables.lmd[t] * self.variables.p_g[g][t]
+        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.variables.lmd[t] * self.variables.p_g[g][t]
                                             for g in self.INVESTMENTS for t in self.TIMES)
         
         # Define NPV, including magic constant
@@ -199,8 +162,8 @@ class InvestmentPlanning(Network):
     def _calculate_capture_prices(self):
         # Calculate capture price
         self.data.capture_prices = {
-            g : (np.sum(self.data.lambda_[t] * self.data.investment_dispatch_values[t][g] for t in self.TIMES) /
-                    np.sum(self.data.investment_dispatch_values[t][g] for t in self.TIMES)) if self.data.investment_values[g] > 0 else None
+            g : round((sum(self.data.lambda_[t] * self.data.investment_dispatch_values[t][g] for t in self.TIMES) /
+                    sum(self.data.investment_dispatch_values[t][g] for t in self.TIMES)), 3) if self.data.investment_values[g] > 0 else None
             for g in self.INVESTMENTS}
 
     def _save_data(self):
@@ -208,24 +171,24 @@ class InvestmentPlanning(Network):
         self.data.objective_value = self.model.ObjVal
         
         # Save investment values
-        self.data.investment_values = {g : self.variables.P_investment[g].x for g in self.INVESTMENTS}
+        self.data.investment_values = {g : round(self.variables.P_investment[g].x, 3) for g in self.INVESTMENTS}
         self.data.capacities = {t :
-                                {**{g : self.data.investment_values[g]*self.fluxes[g][t_ix] for g in self.INVESTMENTS},
+                                {**{g : round(self.data.investment_values[g]*self.fluxes[g][t]*self.cf[g], 3) for g in self.INVESTMENTS},
                                 **{g : self.P_G_max[g] for g in self.GENERATORS},
                                 **{g : self.P_W[t][g] for g in self.WINDTURBINES}}
-                                for t_ix, t in enumerate(self.TIMES)}
+                                for t in self.TIMES}
         
         # Save generation dispatch values
-        self.data.investment_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.INVESTMENTS} for t in self.TIMES}
-        self.data.generator_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.GENERATORS} for t in self.TIMES}
-        self.data.windturbine_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.WINDTURBINES} for t in self.TIMES}
-        self.data.all_dispatch_values = {t : {g : self.variables.p_g[g][t].x for g in self.PRODUCTION_UNITS} for t in self.TIMES}
+        self.data.investment_dispatch_values = {t : {g : round(self.variables.p_g[g][t].x, 3) for g in self.INVESTMENTS} for t in self.TIMES}
+        self.data.generator_dispatch_values = {t : {g : round(self.variables.p_g[g][t].x, 3) for g in self.GENERATORS} for t in self.TIMES}
+        self.data.windturbine_dispatch_values = {t : {g : round(self.variables.p_g[g][t].x, 3) for g in self.WINDTURBINES} for t in self.TIMES}
+        self.data.all_dispatch_values = {t : {g : round(self.variables.p_g[g][t].x, 3) for g in self.PRODUCTION_UNITS} for t in self.TIMES}
 
         # Save demand dispatch values
-        self.data.demand_dispatch_values = {t : {d: self.variables.p_d[d][t].x for d in self.DEMANDS} for t in self.TIMES}
+        self.data.demand_dispatch_values = {t : {d: round(self.variables.p_d[d][t].x, 3) for d in self.DEMANDS} for t in self.TIMES}
         
         # Save uniform prices lambda
-        self.data.lambda_ = {t : self.variables.lmd[t].x for t in self.TIMES}
+        self.data.lambda_ = {t : round(self.variables.lmd[t].x, 3) for t in self.TIMES}
 
         self._calculate_capture_prices()
     
@@ -278,7 +241,7 @@ class InvestmentPlanning(Network):
         plt.show()
     
     def plot_clearing_prices(self):
-        data = [ip.data.lambda_[t] for t in ip.TIMES]
+        data = [ip.data.lambda_[t] for t in self.TIMES]
         plt.figure(figsize=(10, 6))
 
         # Plot the data
@@ -309,9 +272,24 @@ class InvestmentPlanning(Network):
 if __name__ == '__main__':
     # Carbon TAX price: https://www.statista.com/statistics/1322214/carbon-prices-european-union-emission-trading-scheme/
     # Carbon TAX price: https://www.eex.com/en/market-data/emission-allowances/eua-auction-results
-    
     # Initialize investment planning model
-    ip = InvestmentPlanning(hours=20*24, budget=1000, timelimit=600, carbontax=60, seed=38)
+    seed = 38
+    timelimit = 600
+    budget = 1000
+    carbontax = 60
+
+    # Intended initialization of chosen_hours:
+    chosen_days = [190] # if it should be random then do: chosen_days = None
+    chosen_days = range(365)
+    chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
+    
+    ## Initialization of small model for testing:
+    n_hours = 3
+    first_hour = 19
+    chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
+
+    # Initialize investment planning model
+    ip = InvestmentPlanning(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed)
 
     # Build model
     ip.build_model()

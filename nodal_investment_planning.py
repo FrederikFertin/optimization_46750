@@ -104,7 +104,7 @@ class InvestmentPlanning(Network, CommonMethods):
         self.variables.b4           = {d: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b4_{0}_{1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
         self.variables.b5           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b5_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
         self.variables.b6           = {l: {t:       self.model.addVar(vtype=GRB.BINARY, name='b6_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
-        
+
     def _add_primal_lower_level_constraints(self):
         """ Constraint ensuring value of flow is DC-OPF related to voltage angles """
         self.constraints.flow       = self.model.addConstrs((self.variables.flow[l][t] == self.L_susceptance[l] * (self.variables.theta[self.node_L_from[l]][t] - self.variables.theta[self.node_L_to[l]][t])
@@ -149,17 +149,6 @@ class InvestmentPlanning(Network, CommonMethods):
                                                             - gb.quicksum(-self.variables.xi[l][t]*self.L_susceptance[l] for l in self.map_to[n])
                                                             + (self.variables.nu[t] if n == self.root_node else 0) == 0
                                                             for n in self.NODES for t in self.TIMES), name = "derived_lagrange_angles")
-        #self.constraints.angle_lags = self.model.addConstrs(( gb.quicksum(
-        #                                                    (self.variables.lmd[self.node_L_from[l]][t] - self.variables.lmd[self.node_L_to[l]][t]) * self.L_susceptance[l]
-        #                                                    for l in (self.map_from[n] + self.map_to[n]))
-        #                                                    + gb.quicksum(
-        #                                                    (self.variables.rho_over[l][t] - self.variables.rho_under[l][t]) * self.L_susceptance[l]
-        #                                                    for l in self.map_from[n])
-        #                                                    + gb.quicksum(
-        #                                                    (-self.variables.rho_over[l][t] + self.variables.rho_under[l][t]) * self.L_susceptance[l]
-        #                                                    for l in self.map_to[n])
-        #                                                    + (self.variables.nu[t] if n == self.root_node else 0) == 0
-        #                                                    for n in self.NODES for t in self.TIMES), name = "derived_lagrange_angles")
 
         """ KKT for generation minimal production. Bi-linear are replaced by linearized constraints. Lower bound. """
         # Constraint mu_under == 0      for production units if b1 == 1:
