@@ -2,7 +2,7 @@ import pandapower.networks as nw
 import pandapower.plotting as plot
 import numpy as np
 import pandapower as pp
-from natsort import natsorted
+#from natsort import natsorted
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn
