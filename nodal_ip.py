@@ -8,8 +8,9 @@ import pandapower as pp
 import pandapower.plotting as plot
 import matplotlib.pyplot as plt
 import os
+import time
 from matplotlib.lines import Line2D
-from iterative_ip import NodalClearing
+from iterative_ip import NodalClearing, NodalIP
 from common_methods import CommonMethods
 
 
@@ -28,6 +29,10 @@ class BilevelNodalIP(Network, CommonMethods):
                  carbontax:float = 50,
                  seed:int = 42,
                  lmd_ub:dict[dict[float]] = None,
+                 lmd_lb:dict[dict[float]] = None,
+                 min_npv:float = 0,
+                 max_npv:float = GRB.INFINITY,
+                 bounded:bool = False,
                 ):
         super().__init__()
 
@@ -38,20 +43,35 @@ class BilevelNodalIP(Network, CommonMethods):
         self.constraints = expando() # build constraint attributes
         self.results = expando() # build results attributes
         
-        self.chosen_hours = chosen_hours
+        self.chosen_hours = chosen_hours # set chosen hours for optimization
         self.T = len(chosen_hours) # set number of hours in optimization
         self.carbontax = carbontax # set carbon tax in €/tCO2
         self.BUDGET = budget # set budget for capital costs in M€
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
-        self.root_node = 'N1'
-        self.lmd_ub = lmd_ub
-
-        # Big M notation:
-        self.max_investment_capacity = 10*max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
-        self.max_dual_values = 10**3 # Big M for dual variables
+        self.root_node = 'N1' # set root node for reference angle constraint
+        self.bounded = bounded # set bounded flag for investment planning model
+        self.lmd_ub = lmd_ub # set upper bounds for lambda in the investment planning model (from nodal clearing)
+        self.lmd_lb = lmd_lb # set lower bounds for lambda in the investment planning model (from nodal clearing with price-taker investments)
+        self.min_npv = min_npv # set lower bound NPV value for investment planning model
+        self.max_npv = max_npv # set upper bound NPV value for investment planning model
 
         self._initialize_fluxes_demands()
         self._initialize_costs()
+        self._compute_bounds()
+
+    def _compute_bounds(self):
+        # Big M notation and maximum values:
+        self.max_investment_capacity = 10*max(self.P_G_max[g] for g in self.GENERATORS) # Big M for binary variables
+        self.max_dual_values = 10**3 # Big M for dual variables
+        self.max_demand = max(self.P_D[t][d] for d in self.DEMANDS for t in self.TIMES) # Maximum demand for a single demand
+        self.max_production = self.max_investment_capacity # Maximum production capacity
+        self.max_offer = max(self.C_offer.values()) # Maximum offer price
+        self.max_bid = max(self.U_D.values()) # Maximum bid price
+        self.max_lambda = max(self.max_offer, self.max_bid) # Maximum lambda value
+        self.min_lambda = min(min(self.C_offer.values()), min(self.U_D.values())) # Minimum lambda value
+        # Maximum delta in theta if all power would flow on the smallest line:
+        self.max_theta_delta = max(self.demand_dict.values())/min(self.L_susceptance.values())
+        self.max_theta = self.max_theta_delta / 2 # theta can be both positive and negative
 
     def _add_lower_level_variables(self):
         # Define primal variables of lower level KKTs
@@ -81,21 +101,24 @@ class BilevelNodalIP(Network, CommonMethods):
 
     def _add_lower_level_variables_bounded(self):
         # Define primal variables of lower level KKTs
-        self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
-        self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
-        self.variables.flow         = {l: {t:       self.model.addVar(lb=-self.L_cap[l],ub=self.L_cap[l],   name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.p_g          = {g: {n: {t:   self.model.addVar(lb=0,                 ub=self.max_production,         name='generation from {0} at node {1} at time {2}'.format(g,n,t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.p_d          = {d: {n: {t:   self.model.addVar(lb=0,                 ub=self.max_demand,             name='demand from {0} at node {1} at time {2}'.format(d, n, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.theta        = {n: {t:       self.model.addVar(lb=-self.max_theta,   ub=self.max_theta,             name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
+        self.variables.flow         = {l: {t:       self.model.addVar(lb=-self.L_cap[l],    ub=self.L_cap[l],               name='flow_{0}_{1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         # Define dual variables of lower level KKTs
-        self.variables.nu           = {t:           self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
-        self.variables.lmd          = {n: {t:       self.model.addVar(lb=0,             ub=(self.lmd_ub[n][t] if self.lmd_ub else max(self.U_D)),    name='spot price at time {0} in node {1}'.format(t,n)) for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
-        self.variables.xi           = {l: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY,    name='Dual for line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
-        self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,             ub=self.C_offer[g], name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
-        self.variables.mu_over      = {g: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
-        self.variables.sigma_under  = {d: {n: {t:   self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.sigma_over   = {d: {n: {t:   self.model.addVar(lb=0,             ub=self.U_D[d],     name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
-        self.variables.rho_over     = {l: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for ub on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
-        self.variables.rho_under    = {l: {t:       self.model.addVar(lb=0,             ub=GRB.INFINITY,    name='Dual for lb on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.nu           = {t:           self.model.addVar(lb=-self.max_theta,   ub=self.max_theta,              name='Dual for reference angle constraint at time {0}'.format(t)) for t in self.TIMES}
+        self.variables.lmd          = {n: {t:       self.model.addVar(lb=(self.lmd_lb[n][t] if self.lmd_lb else self.min_lambda),
+                                                                      ub=(self.lmd_ub[n][t] if self.lmd_ub else self.max_lambda),
+                                                                      name='spot price at time {0} in node {1}'.format(t,n))
+                                                                      for t in self.TIMES} for n in self.NODES} # Hourly spot price (€/MWh)
+        self.variables.xi           = {l: {t:       self.model.addVar(lb=-2*self.max_lambda,ub=2*self.max_lambda,           name='Dual for line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.mu_under     = {g: {n: {t:   self.model.addVar(lb=0,                 ub=self.C_offer[g],             name='Dual for lb on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.mu_over      = {g: {n: {t:   self.model.addVar(lb=0,                 ub=(self.lmd_ub[n][t] if self.lmd_ub else self.max_offer),    name='Dual for ub on generator {0} at node {1} at time {2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
+        self.variables.sigma_under  = {d: {n: {t:   self.model.addVar(lb=0,                 ub=(self.lmd_ub[n][t] if self.lmd_ub else self.max_bid),    name='Dual for lb on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.sigma_over   = {d: {n: {t:   self.model.addVar(lb=0,                 ub=self.U_D[d],                 name='Dual for ub on demand {0} at time {1}'.format(d, t)) for t in self.TIMES} for n in self.node_D[d]} for d in self.DEMANDS}
+        self.variables.rho_over     = {l: {t:       self.model.addVar(lb=0,                 ub=2*self.max_lambda,           name='Dual for ub on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
+        self.variables.rho_under    = {l: {t:       self.model.addVar(lb=0,                 ub=2*self.max_lambda,           name='Dual for lb on line {0} at time {1}'.format(l, t)) for t in self.TIMES} for l in self.LINES}
 
         # Add binary auxiliary variables for bi-linear constraints
         self.variables.b1           = {g: {n: {t:   self.model.addVar(vtype=GRB.BINARY, name='b1_{0}_{1}_{2}'.format(g, n, t)) for t in self.TIMES} for n in self.node_production[g]} for g in self.PRODUCTION_UNITS}
@@ -229,26 +252,30 @@ class BilevelNodalIP(Network, CommonMethods):
         self.variables.P_investment = {i : {n : self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in tech {0} at node {1}'.format(i, n)) for n in self.node_I[i]} for i in self.INVESTMENTS}
         
         # Get lower level variables
-        self._add_lower_level_variables_bounded()
+        if self.bounded:
+            self._add_lower_level_variables_bounded()
+        else:
+            self._add_lower_level_variables()
 
         self.model.update()
 
         """ Initialize objective to maximize NPV [M€] """
         # Define costs (annualized capital costs + fixed and variable operational costs)
-        costs = gb.quicksum( self.variables.P_investment[i][n] * (self.AF[i] * self.CAPEX[i] + self.f_OPEX[i])
+        self.costs = gb.quicksum( self.variables.P_investment[i][n] * (self.AF[i] * self.CAPEX[i] + self.f_OPEX[i])
                             + 8760/self.T * gb.quicksum(self.v_OPEX[i] * self.variables.p_g[i][n][t] for t in self.TIMES)
                             for i in self.INVESTMENTS for n in self.node_I[i])
         # Define revenue (sum of generation revenues) [M€]
-        revenue = (8760 / self.T / 10**6) * gb.quicksum(self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
+        self.revenue = (8760 / self.T / 10**6) * gb.quicksum(self.variables.lmd[n][t] * self.variables.p_g[i][n][t]
                                             for i in self.INVESTMENTS for t in self.TIMES for n in self.node_I[i])
         
         # Define NPV
-        npv = revenue - costs
+        self.npv = self.revenue - self.costs
 
-        #self.model.addConstr(npv<=200, name='npv_upper_estimate')
+        self.model.addConstr(self.npv<=self.max_npv, name='npv_upper_estimate')
+        self.model.addConstr(self.npv>=self.min_npv, name='npv_lower_estimate')
 
         # Set objective
-        self.model.setObjective(npv, gb.GRB.MAXIMIZE)
+        self.model.setObjective(self.npv, gb.GRB.MAXIMIZE)
 
         self.model.update()
 
@@ -303,6 +330,13 @@ class BilevelNodalIP(Network, CommonMethods):
 
         # Save voltage angles
         self.data.theta = {n : {t : round(self.variables.theta[n][t].x, 3) for t in self.TIMES} for n in self.NODES}
+
+        self.data.xi = {l : {t: round(ip.variables.xi[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+
+        self.data.rho_over = {l : {t: round(ip.variables.rho_over[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+        self.data.rho_under = {l : {t: round(ip.variables.rho_under[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
+
+        self.data.flow = {l : {t: round(ip.variables.flow[l][t].x, 3) for t in self.TIMES} for l in self.LINES}
 
         self._calculate_capture_prices()
 
@@ -503,26 +537,57 @@ if __name__ == '__main__':
     chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
     
     ## Initialization of small model for testing:
-    n_hours = 3
+    n_hours = 2
     first_hour = 19
     chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
 
-    # Run nodal clearing to obtain upper bounds for lambda
-    nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours)
-    nc_org.build_model()
-    nc_org.run()
-    price_forecast = nc_org.data.lambda_ # Upper bounds for lambda in the investment planning model
+    t_start = time.time()
     
-    ip = BilevelNodalIP(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd_ub=price_forecast)
+    bounded = True
+    price_ub = None
+    price_lb = None
+    min_npv = 0
+    max_npv = GRB.INFINITY
 
-    # Build model
+    if False: # Whether we include upper bounds for lambda in the investment planning model
+        nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours)
+        nc_org.build_model()
+        nc_org.run()
+        price_ub        = nc_org.data.lambda_
+        if False: # Whether we include an upper bound for NPV in the investment planning model
+            n_ip = NodalIP(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd_ub=price_ub)
+            n_ip.build_model()
+            n_ip.run()
+            investments     = n_ip.data.investment_values
+            max_npv         = n_ip.data.objective_value
+            if False: # Whether we include a lower bound for NPV in the investment planning model
+                nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours, P_investment=investments)
+                nc_org.build_model()
+                nc_org.run()
+                min_npv         = n_ip.data.npv
+                price_lb        = nc_org.data.lambda_
+
+    ip = BilevelNodalIP(chosen_hours=chosen_hours,
+                        budget=budget,
+                        timelimit=timelimit,
+                        carbontax=carbontax,
+                        seed=seed,
+                        lmd_ub=price_ub,
+                        lmd_lb=price_lb,
+                        max_npv=max_npv,
+                        min_npv=min_npv,
+                        bounded=bounded,
+                        )
     ip.build_model()
-
-    # Run optimization
     ip.run()
+    t_end = time.time()
+    runtime = t_end - t_start
 
     # Display results
     ip.display_results()
+    print('Runtime: {0} seconds'.format(round(runtime,2)))
+    print()
+    
     #ip.plot_network()
     #ip.plot_supply_demand_curve('T1')
     #ip.plot_prices()

@@ -1,12 +1,10 @@
-#%%
+#%% Preamble
 # Import libraries
 import pandas as pd
 import numpy as np
-import os
 import matplotlib.pyplot as plt
+
 # Import classes from other files
-from network import Network
-from common_methods import CommonMethods
 from iterative_ip import NodalClearing, NodalIP
 from bilevel_ip import BilevelIP
 from nodal_ip import BilevelNodalIP
@@ -27,7 +25,7 @@ chosen_days = range(365)
 chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
 
 ## Initialization of small model for testing:
-n_hours = 3
+n_hours = 1
 first_hour = 19
 chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
 
@@ -58,8 +56,8 @@ investment_values_df.to_csv('''results/investment_values,hours={n_hours},
                             runtime={runtime}.csv'''.format(n_hours=n_hours,
                                                             budget=budget,
                                                             carbontax=carbontax,
-                                                            runtime=ip.model.Runtime,
-                                                            )
+                                                            runtime=round(ip.model.Runtime, 2),
+                                                            ).replace('\n', '').replace(' ', '')
                             )
 
 #%% Main from bilevel_ip.py
@@ -86,16 +84,17 @@ ip.run()
 # Display results
 ip.display_results()
 
-ip.plot_supply_demand_curve('T1')
+ip.plot_supply_demand_curve('T19')
 
 #%% Main from iterative_ip.py
 # Model parameters
-hours = 365*24
+chosen_days = range(365)
+chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
 expected_NPV = []
 actual_NPV = []
 
 # Create nodal clearing instance without new investments for a price forecast
-nc_org = NodalClearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
+nc_org = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
 nc_org.build_model()
 nc_org.run()
 nc_org.plot_prices()
@@ -105,7 +104,7 @@ p_forecast = pd.DataFrame(price_forecast)
 # %%
 budgets = np.linspace(0, 2000, 21)
 for budget in budgets:
-    ip = NodalIP(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=100)
+    ip = NodalIP(chosen_hours=chosen_hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=100)
     ip.build_model()
     ip.run()
     ip.display_results()
@@ -113,7 +112,7 @@ for budget in budgets:
     expected_NPV.append(ip.data.objective_value)
 
     # Create nodal clearing instance with new investments
-    nc = NodalClearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
+    nc = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
     nc.build_model()
     nc.run()
     nc.display_results()
