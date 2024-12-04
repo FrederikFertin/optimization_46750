@@ -13,7 +13,7 @@ class expando(object):
     '''
     pass
 
-class nodal_clearing(Network, CommonMethods):
+class NodalClearing(Network, CommonMethods):
     
     def __init__(self,
                  chosen_hours:list[str] = ['T1', 'T2', 'T3', 'T4', 'T5',],
@@ -149,7 +149,7 @@ class nodal_clearing(Network, CommonMethods):
         plt.ylabel('Price [€/MWh]')
         plt.show()
 
-class InvestmentPlanning(Network, CommonMethods):
+class NodalIP(Network, CommonMethods):
     
     def __init__(self,
                  chosen_hours:list[str] = ['T1', 'T2', 'T3', 'T4', 'T5',],
@@ -263,7 +263,8 @@ class InvestmentPlanning(Network, CommonMethods):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 365*24
+    chosen_days = range(365)
+    chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -271,7 +272,7 @@ if __name__ == '__main__':
     actual_NPV = []
 
     # Create nodal clearing instance without new investments for a price forecast
-    nc_org = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
+    nc_org = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
     nc_org.build_model()
     nc_org.run()
     nc_org.plot_prices()
@@ -282,7 +283,7 @@ if __name__ == '__main__':
 # %%
     budgets = np.linspace(0, 2000, 21)
     for budget in budgets:
-        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=100)
+        ip = NodalIP(chosen_hours=chosen_hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=100)
         ip.build_model()
         ip.run()
         ip.display_results()
@@ -290,7 +291,7 @@ if __name__ == '__main__':
         expected_NPV.append(ip.data.objective_value)
 
         # Create nodal clearing instance with new investments
-        nc = nodal_clearing(hours=hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
+        nc = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
         nc.build_model()
         nc.run()
         nc.display_results()

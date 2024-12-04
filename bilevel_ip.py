@@ -16,7 +16,7 @@ class expando(object):
     '''
     pass
 
-class InvestmentPlanning(Network, CommonMethods):
+class BilevelIP(Network, CommonMethods):
     
     def __init__(self,
                  chosen_hours:list[str] = ['T1', 'T2', 'T3', 'T4', 'T5',],
@@ -289,7 +289,7 @@ if __name__ == '__main__':
     chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
 
     # Initialize investment planning model
-    ip = InvestmentPlanning(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed)
+    ip = BilevelIP(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed)
 
     # Build model
     ip.build_model()

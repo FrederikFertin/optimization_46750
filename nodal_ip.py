@@ -9,7 +9,7 @@ import pandapower.plotting as plot
 import matplotlib.pyplot as plt
 import os
 from matplotlib.lines import Line2D
-from iterative_investment_planning import nodal_clearing
+from iterative_ip import NodalClearing
 from common_methods import CommonMethods
 
 
@@ -19,7 +19,7 @@ class expando(object):
     '''
     pass
 
-class InvestmentPlanning(Network, CommonMethods):
+class BilevelNodalIP(Network, CommonMethods):
     
     def __init__(self, 
                  chosen_hours:list[str] = ['T1', 'T2', 'T3', 'T4', 'T5',],
@@ -508,12 +508,12 @@ if __name__ == '__main__':
     chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
 
     # Run nodal clearing to obtain upper bounds for lambda
-    nc_org = nodal_clearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours)
+    nc_org = NodalClearing(timelimit=timelimit, carbontax=carbontax, seed=seed, chosen_hours=chosen_hours)
     nc_org.build_model()
     nc_org.run()
     price_forecast = nc_org.data.lambda_ # Upper bounds for lambda in the investment planning model
     
-    ip = InvestmentPlanning(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd_ub=price_forecast)
+    ip = BilevelNodalIP(chosen_hours=chosen_hours, budget=budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd_ub=price_forecast)
 
     # Build model
     ip.build_model()

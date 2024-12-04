@@ -1,7 +1,7 @@
-import gurobipy as gb
 import numpy as np
 
 class CommonMethods:
+
     def _initialize_fluxes_demands(self):
         self.TIMES = self.chosen_hours
         if self.T < 24: # If typical days are used, set the number of hours to 24
@@ -30,3 +30,4 @@ class CommonMethods:
         self.C_G_offer_modified = {g: round(self.C_G_offer[g] + (self.EF[g]*self.carbontax), 2) for g in self.GENERATORS} # Variable costs in €/MWh incl. carbon tax
         self.C_I_offer = {g: round(self.v_OPEX[g] * 10**6, 2) for g in self.INVESTMENTS} # Variable costs in €/MWh
         self.C_offer = {**self.C_G_offer_modified, **self.C_I_offer, **self.C_W_offer} # Indexed by PRODUCTION_UNITS
+
