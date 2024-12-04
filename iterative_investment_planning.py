@@ -122,11 +122,11 @@ class nodal_clearing(Network, CommonMethods):
         self.data.l_cap_l_dual = {l : {t : self.constraints.line_l_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
         self.data.l_cap_u_dual = {l : {t : self.constraints.line_u_cap[l,t].pi for t in self.TIMES} for l in self.LINES}
 
-        self.costs = gb.quicksum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
-                            + 8760/self.T * gb.quicksum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
+        self.costs = sum(self.P_investment[g][n] * (self.AF[g] * self.CAPEX[g] + self.f_OPEX[g])
+                            + 8760/self.T * sum(self.v_OPEX[g] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES)
                             for g in self.INVESTMENTS for n in self.node_I[g])
         # Define revenue (sum of generation revenues) [M€]
-        self.revenue = (8760 / self.T / 10**6) * gb.quicksum(self.cf[g] * 
+        self.revenue = (8760 / self.T / 10**6) * sum(self.cf[g] * 
                                             self.data.lambda_[n][t] * self.data.investment_dispatch_values[g][n][t]
                                             for g in self.INVESTMENTS for t in self.TIMES for n in self.node_I[g])
         
@@ -158,6 +158,7 @@ class InvestmentPlanning(Network, CommonMethods):
                  carbontax:float=50,
                  seed:int=42,
                  lmd:dict = None,
+                 invest_bound:float = GRB.INFINITY,
                 ): # initialize class
         super().__init__()
 
@@ -175,6 +176,7 @@ class InvestmentPlanning(Network, CommonMethods):
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
         self.root_node = 'N1'
         self.lmd = lmd
+        self.invest_bound = invest_bound
 
         self._initialize_fluxes_demands()
         self._initialize_costs()
@@ -187,7 +189,7 @@ class InvestmentPlanning(Network, CommonMethods):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=GRB.INFINITY, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=self.invest_bound, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         self.model.update()
 
@@ -227,10 +229,9 @@ class InvestmentPlanning(Network, CommonMethods):
     
     def _calculate_capture_prices(self):
         # Calculate capture price
-        self.data.capture_prices = {
-            g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
-                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None
-            for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.data.capture_prices = {g : {n : sum(self.lmd[n][t] * self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) /
+                                    sum(self.data.investment_dispatch_values[g][n][t] for t in self.TIMES) if self.data.investment_values[g][n] > 0 else None 
+                                        for n in self.node_I[g]} for g in self.INVESTMENTS}
 
     def _save_data(self):
         # Save objective value
@@ -262,7 +263,7 @@ class InvestmentPlanning(Network, CommonMethods):
 #%%
 if __name__ == '__main__':
     # Model parameters
-    hours = 2*24
+    hours = 10*24
     timelimit = 600
     carbontax = 60
     seed = 38
@@ -279,8 +280,9 @@ if __name__ == '__main__':
 
 
 # %%
-    for budget in np.logspace(0, 4, 10):
-        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forcast)
+    budgets = np.log(np.linspace(1, 2000, 20))
+    for budget in budgets:
+        ip = InvestmentPlanning(hours=hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast)
         ip.build_model()
         ip.run()
         ip.display_results()
@@ -295,11 +297,11 @@ if __name__ == '__main__':
         actual_NPV.append(nc.data.npv)
 
     # %%
-    plt.plot(np.logspace(0, 4, 5), expected_NPV, label='Expected NPV')
-    plt.plot(np.logspace(0, 4, 5), actual_NPV, label='Actual NPV')
+    plt.plot(budgets, expected_NPV, label='Expected NPV')
+    plt.plot(budgets, actual_NPV, label='Actual NPV')
     plt.xscale('log')
     plt.xlabel('Budget [M€]')
-    plt.yscale('log')
+    # plt.yscale('log')
     plt.ylabel('NPV [M€]')
     plt.legend()
     plt.show()
