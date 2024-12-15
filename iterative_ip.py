@@ -36,13 +36,16 @@ class NodalClearing(Network, CommonMethods):
         self.carbontax = carbontax # set carbon tax in €/tCO2
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
         self.root_node = 'N1'
+        
+        self._initialize_fluxes_demands()
+        self._initialize_costs()
 
         self.P_investment = P_investment
         if P_investment is None:
             self.P_investment = {i: {n: 0 for n in self.node_I[i]} for i in self.INVESTMENTS}
+            
 
-        self._initialize_fluxes_demands()
-        self._initialize_costs()
+
         # Define generation costs
         self.PRODUCTION_UNITS = self.GENERATORS + self.WINDTURBINES + self.INVESTMENTS
         self.node_production = {**self.node_G, **self.node_I, **self.node_W}
