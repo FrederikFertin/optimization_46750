@@ -562,7 +562,7 @@ if __name__ == '__main__':
     for n_hours in [5, 24]:
         runtimes[str(n_hours)] = {}
         gb_runtimes[str(n_hours)] = {}
-        for scen in [4]:
+        for scen in range(5):
             first_hour = 19
             chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
 
