@@ -268,8 +268,7 @@ if __name__ == '__main__':
     timelimit = 600
     carbontax = 60
     seed = 38
-    expected_NPV = []
-    actual_NPV = []
+    
 
     # Create nodal clearing instance without new investments for a price forecast
     nc_org = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
@@ -281,6 +280,8 @@ if __name__ == '__main__':
 
 
 # %%
+    expected_NPV = []
+    actual_NPV = []
     budgets = np.linspace(0, 2000, 21)
     for budget in budgets:
         ip = NodalIP(chosen_hours=chosen_hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=100)
