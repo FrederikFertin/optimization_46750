@@ -147,9 +147,9 @@ fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 fig.tight_layout(pad=5.0)
 for i, bound in enumerate(investment_bounds):
     ax = axs[i//2, i%2]
-    ax.plot(budgets, expected_NPV[str(bound)].values(), marker = 'o', label='Expected NPV')
-    ax.plot(budgets, actual_NPV[str(bound)].values(), marker = 'd', label='Actual NPV')
-    ax.plot(budgets, optimal_NPV[str(bound)].values(), marker = 'x', label='"Optimal" NPV')
+    ax.plot(budgets, expected_NPV[str(bound)].values(), marker = 'o', label='Expected NPV (3H)')
+    ax.plot(budgets, actual_NPV[str(bound)].values(), marker = 'd', label='Actual NPV (3H)')
+    ax.plot(budgets, optimal_NPV[str(bound)].values(), marker = 'x', label='"Optimal" NPV (3H)')
     ax.plot(budgets, expected_NPV_all_data[str(bound)].values(), marker = 'o', label='Expected NPV (all data)', linestyle='dashed')
     ax.plot(budgets, actual_NPV_all_data[str(bound)].values(), marker = 'd', label='Actual NPV (all data)', linestyle='dashed')
     ax.set_xlabel('Budget [M€]')

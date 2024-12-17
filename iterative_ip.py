@@ -7,6 +7,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from common_methods import CommonMethods
 
+import seaborn as sns
+sns.set_style("whitegrid")
+
+
 class expando(object):
     '''
         A small class which can have attributes set
@@ -180,7 +184,7 @@ class NodalIP(Network, CommonMethods):
         self.root_node = 'N1' # set root node for voltage angle reference
         self.lmd = lmd # set price forecast based on nodal clearing
         self.invest_bound = invest_bound # set upper bound for investment capacity
-
+        
         self._initialize_fluxes_demands()
         self._initialize_costs()
 
@@ -192,8 +196,8 @@ class NodalIP(Network, CommonMethods):
 
         """ Initialize variables """
         # Investment in generation technologies (in MW)
-        self.variables.P_investment = {g : {n :     self.model.addVar(lb=0, ub=self.invest_bound, name='investment in {0}'.format(g)) for n in self.node_I[g]} for g in self.INVESTMENTS}
-        self.variables.p_g =          {g : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY, name='generation from {0} at time {1}'.format(g, t)) for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.variables.P_investment = {i : {n :     self.model.addVar(lb=0, ub=self.invest_bound, name='investment in {0}'.format(i)) for n in self.node_I[i]} for i in self.INVESTMENTS}
+        self.variables.p_g =          {i : {n : {t: self.model.addVar(lb=0, ub=GRB.INFINITY,      name='generation from {0} at time {1}'.format(i, t)) for t in self.TIMES} for n in self.node_I[i]} for i in self.INVESTMENTS}
         self.model.update()
 
         """ Initialize objective to maximize NPV [M€] """
@@ -309,5 +313,61 @@ if __name__ == '__main__':
     # plt.yscale('log')
     plt.ylabel('NPV [M€]')
     plt.legend()
+    plt.show()
+
+# %%
+if __name__ == "__main__":
+    timelimit = 600
+    carbontax = 60
+    seed = 38
+    chosen_days = range(365)
+    chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
+    budgets = np.linspace(0, 2000, 11)
+    investment_bounds = [np.inf, 500, 200, 100]
+    expected_NPV = {str(bound): {} for bound in investment_bounds}
+    actual_NPV = {str(bound): {} for bound in investment_bounds}
+    optimal_NPV = {str(bound): {} for bound in investment_bounds}
+    optimal_investments = {str(bound): {} for bound in investment_bounds}
+
+    nc_org = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
+    nc_org.build_model()
+    nc_org.run()
+    nc_org.plot_prices()
+    price_forecast = nc_org.data.lambda_
+
+    for budget in budgets:
+        for invest_bound in investment_bounds:
+            
+            # Create nodal investment planning instance
+            ip = NodalIP(chosen_hours=chosen_hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_forecast, invest_bound=invest_bound)
+            ip.build_model()
+            ip.run()
+            investments=ip.data.investment_values
+            expected_NPV[str(invest_bound)][str(budget)]=ip.data.objective_value
+
+            # Create nodal clearing instance with new investments
+            nc = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed, P_investment=investments)
+            nc.build_model()
+            nc.run()
+            actual_NPV[str(invest_bound)][str(budget)] = nc.data.npv
+
+
+            optimal_investments[str(invest_bound)][str(budget)] = investments
+            # optimal_NPV[str(invest_bound)][str(budget)] = ip.data.objective_value
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+    fig.tight_layout(pad=5.0)
+    for i, bound in enumerate(investment_bounds):
+        ax = axs[i//2, i%2]
+        ax.plot(budgets, expected_NPV[str(bound)].values(), marker = 'o', label='Expected NPV')
+        ax.plot(budgets, actual_NPV[str(bound)].values(), marker = 'd', label='Actual NPV')
+        # ax.plot(budgets, optimal_NPV[str(bound)].values(), marker = 'x', label='Optimal NPV')
+        ax.set_xlabel('Budget [M€]')
+        ax.set_ylabel('NPV [M€]')
+        ax.set_xlim([0, 2000])
+        if bound == np.inf:
+            bound = 'Unlimited'
+        ax.set_title('Investment bound: {0} MW'.format(bound))
+        ax.legend()
     plt.show()
 # %%
