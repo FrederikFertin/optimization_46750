@@ -161,23 +161,32 @@ for i, bound in enumerate(investment_bounds):
     ax.legend()
 plt.show()
 
-fig, axs = plt.subplots(2, 2, figsize=(10, 10),)
+fig, axs = plt.subplots(2, 2, figsize=(10, 8),)
 fig.tight_layout(pad=5.0, rect=[0, 0, 1, 1])
 for i, bound in enumerate(investment_bounds):
     ax = axs[i//2, i%2]
-    ax.plot(budgets, expected_NPV[str(bound)].values(), marker = 'o', label='Expected NPV')
-    ax.plot(budgets, actual_NPV[str(bound)].values(), marker = 'd', label='Actual NPV')
-    ax.plot(budgets, optimal_NPV[str(bound)].values(), marker = 'x', label='"Optimal" NPV')
-    ax.plot(budgets, expected_NPV_all_data[str(bound)].values(), marker = 'o', label='Expected NPV (all data)', linestyle='dashed')
-    ax.plot(budgets, actual_NPV_all_data[str(bound)].values(), marker = 'd', label='Actual NPV (all data)', linestyle='dashed')
-    ax.plot(budgets, actual_optimal_NPV[str(bound)].values(), marker = 'x', label='"Optimal" NPV (all data)', linestyle='dashed')
+    ax.plot(budgets, expected_NPV[str(bound)].values(), color = 'tab:blue', marker = 'o', linestyle = 'dashed', label='Expected NPV (3H)')
+    ax.plot(budgets, actual_NPV[str(bound)].values(), color = 'tab:orange',  marker = 'd', linestyle = 'dashed', label='Actual NPV (3H)')
+    ax.plot(budgets, optimal_NPV[str(bound)].values(), color = 'tab:green', marker = 'x', linestyle = 'dashed', label='"Optimal" NPV (3H)')
+    ax.plot(budgets, expected_NPV_all_data[str(bound)].values(), color = 'tab:blue', marker = 'o', label='Expected NPV (all data)')
+    ax.plot(budgets, actual_NPV_all_data[str(bound)].values(), color = 'tab:orange', marker = 'd', label='Actual NPV (all data)')
+    ax.plot(budgets, actual_optimal_NPV[str(bound)].values(), color = 'tab:green', marker = 'x', label='"Optimal" NPV (all data)')
     ax.set_xlabel('Budget [M€]')
     ax.set_ylabel('NPV [M€]')
     ax.set_xlim([0, 2000])
     if bound == np.inf:
         bound = 'Unlimited'
     ax.set_title('Investment bound: {0} MW'.format(bound))
-axs[1][1].legend(bbox_to_anchor=(-0.15, -0.3), loc='lower right', ncol=2)
+axs[1][1].legend(bbox_to_anchor=(0.4, -0.5), loc='lower right', ncol=2)
 plt.show()
 
 print()
+
+#%%
+# Save the NPVs as csv
+l = [expected_NPV, actual_NPV, optimal_NPV, expected_NPV_all_data, actual_NPV_all_data, optimal_NPV_all_data, actual_optimal_NPV]
+l_str = ['expected_NPV', 'actual_NPV', 'optimal_NPV', 'expected_NPV_all_data', 'actual_NPV_all_data', 'optimal_NPV_all_data', 'actual_optimal_NPV']
+for i, d in enumerate(l):
+    df = pd.DataFrame(d)
+    df.to_csv('results/{0}.csv'.format(l_str[i]))
+# %%
