@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from iterative_ip import NodalClearing, NodalIP
 from nodal_ip import BilevelNodalIP
 import seaborn as sns
+from time import time
 
 # Set style for plots
 sns.set_style("whitegrid")
@@ -21,6 +22,28 @@ carbontax = 60
 n_hours = 3
 first_hour = 10
 chosen_hours = list('T{0}'.format(i) for i in range(first_hour, first_hour+n_hours))
+
+budget = 1000
+
+chosen_days_list = [range(365), range(180), range(1)]
+chosen_hours_list = [list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24)) for chosen_days in chosen_days_list]
+
+nc_runtimes = []
+ip_runtimes = []
+
+for chosen_hours in chosen_hours_list:
+    t_start = time()
+    nc_org = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
+    nc_org.build_model()
+    nc_org.run()
+    price_ub = nc_org.data.lambda_
+    nc_runtimes.append(time()-t_start)
+    
+    t_start = time()
+    ip = NodalIP(chosen_hours=chosen_hours, budget = budget, timelimit=timelimit, carbontax=carbontax, seed=seed, lmd=price_ub)
+    ip.build_model()
+    ip.run()
+    ip_runtimes.append(time()-t_start)
 
 # Create nodal clearing instance without new investments for a price forecast
 nc_org = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
