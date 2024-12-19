@@ -6,6 +6,7 @@ from iterative_ip import expando
 from network import Network
 import pandas as pd
 from common_methods import CommonMethods
+from time import time
 
 # Confirmed the same as the other NodalCLearing:
 class NodalClearing(Network, CommonMethods):
@@ -242,6 +243,7 @@ class ADMM():
         self.tau = tau
         self.primal_residuals = []
         self.dual_residuals = []
+        self.times = []
         self.gammas = []
         self.beta = 1
         self.alpha = 1
@@ -354,6 +356,7 @@ class ADMM():
         for k in range(self.K):
             #self.gamma = np.sqrt(k+1)
             # Solve the subproblems
+            t_start = time()
             self._update_theta_i()
             # Update theta_hat
             self._update_theta_hat()
@@ -364,6 +367,8 @@ class ADMM():
             print(f'Iteration {k}')
             if self._check_convergence(k):
                 return k
+            t_end = time()
+            self.times.append(t_end - t_start)
         return self.K
         
     def _save_results(self):
@@ -383,7 +388,7 @@ if __name__ == "__main__":
     seed = 38
     chosen_days = range(1)
     chosen_hours = list('T{0}'.format(i+1) for d in chosen_days for i in range(d*24, (d+1)*24))
-    chosen_hours = ['T1',]
+    #chosen_hours = ['T1',]
 
     market_clearing_instances = {}
     # For each subproblem/node, denote nodes that are considered in each subproblem
@@ -398,17 +403,19 @@ if __name__ == "__main__":
     
     gamma = 100 # penalty parameter
     tau = 1.0 # Step size multiplier
-    K = 10000 # Maximum number of iterations
+    K = 10 # Maximum number of iterations
     epsilon = 0.0001 # Tolerance for convergence
 
     # Create a submodel for each generator
     print()
     print('Creating models for each node:')
+    t_start = time()
     for n in network_instance.NODES:
         print(f'Node {n}')
         market_clearing_instances[n] = NodalClearingDecomposed(node=n, chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed)
         market_clearing_instances[n].build_model()
-    
+    model_creation_time = time() - t_start
+
     nc = NodalClearing(chosen_hours=chosen_hours, timelimit=timelimit, carbontax=carbontax, seed=seed) # For comparing the results
     nc.build_model()
     nc.run()
@@ -427,7 +434,10 @@ if __name__ == "__main__":
                 chosen_hours = chosen_hours,
                 network_instance=network_instance)
     admm.run_algorithm()
-
+    print(f'Model creation time: {model_creation_time}')
+    print(f'Algorithm runtime: {sum(admm.times)}')
+    print(f'Iterations: {admm.iterations}')
+    print(f'Average iteration time: {sum(admm.times)/admm.iterations}')
     admm_demands = []
     nc_demands = []
     for d in nc.DEMANDS:
