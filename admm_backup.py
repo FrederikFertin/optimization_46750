@@ -51,11 +51,9 @@ class NodalClearing(Network, CommonMethods):
         self.variables.theta        = {n: {t:       self.model.addVar(lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_{0}_{1}'.format(n, t)) for t in self.TIMES} for n in self.NODES}
 
         """ Initialize objective function """
-        self.model.setObjective(gb.quicksum(
-                               - gb.quicksum(self.U_D[d] * self.variables.p_d[d][n][t] for d in self.DEMANDS for n in self.node_D[d])
-                               + gb.quicksum(self.C_offer[g] * self.variables.p_g[g][n][t] for g in self.PRODUCTION_UNITS for n in self.node_production[g])
-                               for t in self.TIMES)
-                                , gb.GRB.MINIMIZE)
+        self.model.setObjective(gb.quicksum(self.U_D[d] * self.variables.p_d[d][n][t] for d in self.DEMANDS for n in self.node_D[d] for t in self.TIMES)
+                               -gb.quicksum(self.C_offer[g] * self.variables.p_g[g][n][t] for g in self.PRODUCTION_UNITS for n in self.node_production[g] for t in self.TIMES)
+                                , gb.GRB.MAXIMIZE)
         self.model.update()
 
         """ Initialize constraints """
@@ -94,16 +92,14 @@ class NodalClearing(Network, CommonMethods):
         self.data.objective_value = self.model.ObjVal
         
         # Save dispatch values
-        self.data.generator_dispatch_values = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_G[g]} for g in self.GENERATORS}
-        self.data.demand_dispatch = {d : {t : self.variables.p_d[d][self.node_D[d][0]][t].x for t in self.TIMES} for d in self.DEMANDS}
+        self.data.generator_dispatch = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_G[g]} for g in self.GENERATORS}
+        self.data.demand_dispatch = {d : {t : self.variables.p_d[d][self.map_d[d][0]][t].x for t in self.TIMES} for d in self.DEMANDS}
+
         # Save generation dispatch values
-        self.data.investment_dispatch_values = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
+        self.data.investment_dispatch = {g : {n : {t : self.variables.p_g[g][n][t].x for t in self.TIMES} for n in self.node_I[g]} for g in self.INVESTMENTS}
         
         # Save uniform prices lambda
         self.data.lambda_ = {n : {t : self.constraints.balance[n,t].pi for t in self.TIMES} for n in self.NODES}
-
-        #self.data.rho_lower = {n : {m : {t: self.constraints.line_l_cap[n,m,t].pi for t in self.TIMES} for m in self.map_n[n]} for n in self.NODES}
-        self.data.rho_upper = {n : {m : {t: self.constraints.line_u_cap[n,m,t].pi for t in self.TIMES} for m in self.map_n[n]} for n in self.NODES}
 
         # Save voltage angles
         self.data.theta = {n : {t : self.variables.theta[n][t].x for t in self.TIMES} for n in self.NODES}
@@ -151,6 +147,7 @@ class NodalClearingDecomposed(Network, CommonMethods):
         
         self.chosen_hours = chosen_hours
         self.T = len(chosen_hours) # set number of hours in optimization
+        self.TIMES = chosen_hours
         self.carbontax = carbontax # set carbon tax in €/tCO2
         self.timelimit = timelimit # set time limit for optimization to 100 seconds (default)
         self.root_node = 'N13'
@@ -223,15 +220,15 @@ class NodalClearingDecomposed(Network, CommonMethods):
 
     def solve(self):
         self.model.optimize()
+        self.model.update()
         self._get_theta_i()
 
 class ADMM():
-    def __init__(self, models, lambdas, theta_i, theta_hat, K, tolerance, gamma = 1, tau = 1, nodes = None, considered_nodes = None, chosen_hours = None, network_instance = None):
+    def __init__(self, models, lambdas, theta_i, theta_hat, K, tolerance, gamma = 1, tau = 1.1, nodes = None, considered_nodes = None, chosen_hours = None, network_instance = None):
         self.models = models
         self.lambdas = lambdas
         self.tolerance = tolerance
         self.gamma = gamma
-        self.penalty = gamma
         self.K = K
         self.theta_i = theta_i
         self.theta_hat = theta_hat
@@ -251,34 +248,35 @@ class ADMM():
         self.dual_scaler = sum(1 for _ in self.nodes for _ in self.TIMES)
         self.network = network_instance
 
-    def _update_theta_hat(self):
-        t_i = self.theta_i[-1]
-        t_h_old = self.theta_hat[-1]
-        self.hat_model.setObjective(gb.quicksum(
-                self.gamma/2 * (t_i[n][m][t] - self.var__t_h[m,t])**2
-                for n in self.subproblems for m in self.considered_nodes[n] for t in self.TIMES), gb.GRB.MINIMIZE)
-        self.hat_model.optimize()
-        
-        self.theta_hat.append({n : {t : self.var__t_h[n, t].x * max(self.alpha, 0.25) + t_h_old[n][t] * (1-max(self.alpha, 0.25)) for t in self.TIMES} for n in self.nodes})
-        
-        # t_h = {}
-        # for n in self.nodes:
-        #     t_h[n] = {}
-        #     for t in self.TIMES:
-        #         tot = sum(t_i[m][n][t] for m in self.considered_nodes[n])
-        #         size_ = sum(1 for _ in self.considered_nodes[n])
-        #         t_h_new = tot / size_
-        #         t_h[n][t] = self.alpha * t_h_new + (1 - self.alpha) * t_h_old[n][t]
-        # self.theta_hat.append(t_h)
-
     def _update_theta_i(self):
         new_theta_i = {}
         for n in self.subproblems:
-            self.models[n].set_objective(self.lambdas[-1], self.penalty, self.theta_hat[-1])
+            self.models[n].set_objective(self.lambdas[-1], self.gamma, self.theta_hat[-1])
             self.models[n].solve()
             new_theta_i[n] = self.models[n].data.theta_i
 
         self.theta_i.append(new_theta_i)
+
+
+    def _update_theta_hat(self):
+        t_i = self.theta_i[-1]
+        t_h_old = self.theta_hat[-1]
+        # self.hat_model.setObjective(gb.quicksum(
+        #         self.gamma/2 * (t_i[n][m][t] - self.var__t_h[m,t])**2
+        #         for n in self.subproblems for m in self.considered_nodes[n] for t in self.TIMES), gb.GRB.MINIMIZE)
+        # self.hat_model.optimize()
+        
+        # self.theta_hat.append({n : {t : self.var__t_h[n, t].x for t in self.TIMES} for n in self.nodes})
+        t_h_new = {}
+        for n in self.nodes:
+            t_h_new[n] = {}
+            for t in self.TIMES:
+                tot = sum(t_i[m][n][t] for m in self.considered_nodes[n])
+                size_ = sum(1 for _ in self.considered_nodes[n])
+                t_h = tot / size_
+                t_h_new[n][t] = self.alpha * t_h + (1 - self.alpha) * t_h_old[n][t]
+        self.theta_hat.append(t_h_new)
+
 
     def _update_lambdas(self):
         new_lambdas = {}
@@ -307,7 +305,7 @@ class ADMM():
         
     #     self.lambdas.append(new_lambdas)
 
-    def _check_convergence(self, k):
+    def _check_convergence(self):
         t_hat_current = self.theta_hat[-1]
         t_hat_previous = self.theta_hat[-2]
         dual_residual = self.gamma * np.sqrt(sum((t_hat_current[n][t] - t_hat_previous[n][t])**2 for n in self.nodes for t in self.TIMES)) / self.dual_scaler
@@ -321,19 +319,16 @@ class ADMM():
             self.gamma = self.tau * self.gamma
         else:
             self.gamma = self.gamma / self.tau
-        self.penalty = self.gamma * (1 + np.log(k+1))
-        print(f'Penalty: {self.penalty}')
-        print(f'Gamma: {self.gamma}')
+        if not(self.tau == 1):
+            print(f'Gamma: {self.gamma}')
 
         if len(self.primal_residuals) > 0:
             if max(primal_residual, dual_residual)/max(self.primal_residuals[-1], self.dual_residuals[-1]) < 1:
                 self.beta_new = (1 + np.sqrt(1 + 4 * self.beta**2)) / 2
-                self.alpha = 1 - (self.beta - 1) / (self.beta_new)
+                self.alpha = 1 - (self.beta - 1) / self.beta_new
                 self.beta = self.beta_new
             else:
                 self.alpha = 1
-        #self.alpha = 1
-
         self.betas.append(self.beta)
         self.alphas.append(self.alpha)
         self.primal_residuals.append(primal_residual)
@@ -349,7 +344,6 @@ class ADMM():
         self.hat_model = gb.Model(name='Theta_hat_update')
         self.hat_model.Params.OutputFlag = 0
         self.var__t_h = self.hat_model.addVars(self.nodes, self.TIMES, lb=-GRB.INFINITY, ub=GRB.INFINITY, name='theta_hat')
-        #self.hat_model.addConstrs((self.models['N1'].L_susceptance[self.models['N1'].map_n[n][m]] * (self.var__t_h[n, t] - self.var__t_h[m, t]) <= self.models['N1'].L_cap[self.models['N1'].map_n[n][m]] for n in self.nodes for m in self.models['N1'].map_n[n] for t in self.TIMES), name='ref_angle')
 
         for k in range(self.K):
             #self.gamma = np.sqrt(k+1)
@@ -362,7 +356,7 @@ class ADMM():
             # Check for convergence
             print()
             print(f'Iteration {k}')
-            if self._check_convergence(k):
+            if self._check_convergence():
                 return k
         return self.K
         
@@ -396,10 +390,9 @@ if __name__ == "__main__":
     # Initialize copy variables of theta_i (variables in complicating constraints) to 0 for each subproblem and each considered node and each time period:
     theta_i = [{subproblem: {considered_node : {t : 0 for t in chosen_hours} for considered_node in considered_nodes[subproblem]} for subproblem in network_instance.NODES}]
     
-    gamma = 100 # penalty parameter
+    gamma = 10 # Gradient step size
     tau = 1.0 # Step size multiplier
-    K = 10000 # Maximum number of iterations
-    epsilon = 0.0001 # Tolerance for convergence
+    K = 1000 # Maximum number of iterations
 
     # Create a submodel for each generator
     print()
@@ -414,28 +407,8 @@ if __name__ == "__main__":
     nc.run()
 
     # Create ADMM instance
-    admm = ADMM(models=market_clearing_instances,
-                lambdas=lambdas, 
-                theta_hat=theta_hat,
-                theta_i=theta_i,
-                K=K,
-                tolerance=epsilon,
-                tau = tau,
-                gamma=gamma,
-                nodes = network_instance.NODES,
-                considered_nodes = considered_nodes,
-                chosen_hours = chosen_hours,
-                network_instance=network_instance)
+    admm = ADMM(models=market_clearing_instances, lambdas=lambdas, theta_hat=theta_hat, theta_i=theta_i, K=K, tolerance=0.01, tau = tau, gamma=gamma, nodes = network_instance.NODES, considered_nodes = considered_nodes, chosen_hours = chosen_hours, network_instance = network_instance)
     admm.run_algorithm()
-
-    admm_demands = []
-    nc_demands = []
-    for d in nc.DEMANDS:
-        admm_demands.append(round(admm.models[nc.node_D[d][0]].variables.p_d[d][nc.node_D[d][0]]['T1'].x,2))
-        nc_demands.append(round(nc.variables.p_d[d][nc.node_D[d][0]]['T1'].x,2))
-    print('Demands:')
-    print(admm_demands)
-    print(nc_demands)
 
     # Plot primal and dual residuals and gamma
     fig = plt.figure()
@@ -479,7 +452,5 @@ if __name__ == "__main__":
     plt.show()
     # Compare the results with the centralized model
     
-    
 
     print()
-    
